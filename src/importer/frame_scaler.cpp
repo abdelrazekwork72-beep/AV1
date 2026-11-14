@@ -50,37 +50,31 @@ uint8_t clampByte(int32_t value) noexcept {
 #ifdef OPENMEDIA_HAS_FFMPEG
 
 AVPixelFormat toAvPixelFormat(openmedia::PixelFormat fmt) noexcept {
-    switch (fmt) {
-        case openmedia::PixelFormat::YUV420P:
-            return AV_PIX_FMT_YUV420P;
-        case openmedia::PixelFormat::YUV422P:
-            return AV_PIX_FMT_YUV422P;
-        case openmedia::PixelFormat::YUV444P:
-            return AV_PIX_FMT_YUV444P;
-        case openmedia::PixelFormat::YUV420P10LE:
-            return AV_PIX_FMT_YUV420P10LE;
-        case openmedia::PixelFormat::YUV422P10LE:
-            return AV_PIX_FMT_YUV422P10LE;
-        case openmedia::PixelFormat::YUV444P10LE:
-            return AV_PIX_FMT_YUV444P10LE;
-        case openmedia::PixelFormat::YUV420P12LE:
-            return AV_PIX_FMT_YUV420P12LE;
-        case openmedia::PixelFormat::YUV422P12LE:
-            return AV_PIX_FMT_YUV422P12LE;
-        case openmedia::PixelFormat::YUV444P12LE:
-            return AV_PIX_FMT_YUV444P12LE;
-        case openmedia::PixelFormat::BGRA8:
-            return AV_PIX_FMT_BGRA;
-        case openmedia::PixelFormat::RGBA8:
-            return AV_PIX_FMT_RGBA;
-        case openmedia::PixelFormat::NV12:
-            return AV_PIX_FMT_NV12;
-        case openmedia::PixelFormat::P010LE:
-            return AV_PIX_FMT_P010LE;
-        case openmedia::PixelFormat::Unknown:
-        default:
-            return AV_PIX_FMT_NONE;
+    struct AvFmtEntry {
+        openmedia::PixelFormat src;
+        AVPixelFormat dst;
+    };
+    static constexpr AvFmtEntry kTable[] = {
+        {openmedia::PixelFormat::YUV420P, AV_PIX_FMT_YUV420P},
+        {openmedia::PixelFormat::YUV422P, AV_PIX_FMT_YUV422P},
+        {openmedia::PixelFormat::YUV444P, AV_PIX_FMT_YUV444P},
+        {openmedia::PixelFormat::YUV420P10LE, AV_PIX_FMT_YUV420P10LE},
+        {openmedia::PixelFormat::YUV422P10LE, AV_PIX_FMT_YUV422P10LE},
+        {openmedia::PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV444P10LE},
+        {openmedia::PixelFormat::YUV420P12LE, AV_PIX_FMT_YUV420P12LE},
+        {openmedia::PixelFormat::YUV422P12LE, AV_PIX_FMT_YUV422P12LE},
+        {openmedia::PixelFormat::YUV444P12LE, AV_PIX_FMT_YUV444P12LE},
+        {openmedia::PixelFormat::BGRA8, AV_PIX_FMT_BGRA},
+        {openmedia::PixelFormat::RGBA8, AV_PIX_FMT_RGBA},
+        {openmedia::PixelFormat::NV12, AV_PIX_FMT_NV12},
+        {openmedia::PixelFormat::P010LE, AV_PIX_FMT_P010LE},
+    };
+    for (const auto& entry : kTable) {
+        if (entry.src == fmt) {
+            return entry.dst;
+        }
     }
+    return AV_PIX_FMT_NONE;
 }
 
 void applySwsColorspace(SwsContext* ctx,
