@@ -22,13 +22,17 @@ namespace openmedia {
 
 namespace {
 
+bool hasOpenAvio(const AVFormatContext* ctx) noexcept {
+    return ctx->oformat && !(ctx->oformat->flags & AVFMT_NOFILE) && ctx->pb;
+}
+
 /// @brief Custom RAII deleter for output AVFormatContext (closes AVIO if open).
 struct AVFormatOutputDeleter {
     void operator()(AVFormatContext* ctx) const noexcept {
         if (!ctx) {
             return;
         }
-        if (ctx->oformat && !(ctx->oformat->flags & AVFMT_NOFILE) && ctx->pb) {
+        if (hasOpenAvio(ctx)) {
             avio_closep(&ctx->pb);
         }
         avformat_free_context(ctx);
@@ -102,23 +106,51 @@ AVMediaType mapMediaType(MediaType type) noexcept {
     return AVMEDIA_TYPE_UNKNOWN;
 }
 
-bool configureStreamParameters(AVStream* stream, const StreamInfo& info) {
-    AVCodecID avCodec = mapCodecId(info.codec);
-    AVMediaType avType = mapMediaType(info.type);
-    if (avCodec == AV_CODEC_ID_NONE || avType == AVMEDIA_TYPE_UNKNOWN) {
-        return false;
+int64_t sanitizePositiveNum(int64_t value) noexcept {
+    if (value > 0) {
+        return value;
     }
+    return 1;
+}
+
+int32_t sanitizeChannels(int32_t channels) noexcept {
+    if (channels > 0) {
+        return channels;
+    }
+    return 2;
+}
+
+void applyCommonStreamParams(AVStream* stream, AVCodecID avCodec, AVMediaType avType, const StreamInfo& info) {
     stream->codecpar->codec_type = avType;
     stream->codecpar->codec_id = avCodec;
-    RationalTime tb = RationalTime::sanitize(info.timeBase.num > 0 ? info.timeBase.num : 1, info.timeBase.den);
+    const int64_t safeNum = sanitizePositiveNum(info.timeBase.num);
+    RationalTime tb = RationalTime::sanitize(safeNum, info.timeBase.den);
     stream->time_base = AVRational{static_cast<int>(tb.num), static_cast<int>(tb.den)};
+}
+
+void applyMediaSpecificParams(AVStream* stream, AVMediaType avType, const StreamInfo& info) {
     if (avType == AVMEDIA_TYPE_VIDEO) {
         stream->codecpar->width = info.width;
         stream->codecpar->height = info.height;
-    } else if (avType == AVMEDIA_TYPE_AUDIO) {
-        stream->codecpar->sample_rate = info.sampleRate;
-        av_channel_layout_default(&stream->codecpar->ch_layout, info.channels > 0 ? info.channels : 2);
+        return;
     }
+    if (avType == AVMEDIA_TYPE_AUDIO) {
+        stream->codecpar->sample_rate = info.sampleRate;
+        av_channel_layout_default(&stream->codecpar->ch_layout, sanitizeChannels(info.channels));
+    }
+}
+
+bool configureStreamParameters(AVStream* stream, const StreamInfo& info) {
+    AVCodecID avCodec = mapCodecId(info.codec);
+    AVMediaType avType = mapMediaType(info.type);
+    if (avCodec == AV_CODEC_ID_NONE) {
+        return false;
+    }
+    if (avType == AVMEDIA_TYPE_UNKNOWN) {
+        return false;
+    }
+    applyCommonStreamParams(stream, avCodec, avType, info);
+    applyMediaSpecificParams(stream, avType, info);
     return true;
 }
 
@@ -135,6 +167,50 @@ bool copyExtradata(AVCodecParameters* codecpar, const std::vector<uint8_t>& extr
     codecpar->extradata = buf;
     codecpar->extradata_size = static_cast<int>(extradata.size());
     return true;
+}
+
+AVFormatOutputPtr allocateOutputContext(const std::string& path, const std::string& formatName) {
+    AVFormatContext* rawCtx = nullptr;
+    if (avformat_alloc_output_context2(&rawCtx, nullptr, formatName.c_str(), path.c_str()) < 0) {
+        return nullptr;
+    }
+    return AVFormatOutputPtr(rawCtx);
+}
+
+bool openOutputIoIfNeeded(AVFormatContext* ctx, const std::string& path) {
+    if (ctx->oformat->flags & AVFMT_NOFILE) {
+        return true;
+    }
+    return avio_open(&ctx->pb, path.c_str(), AVIO_FLAG_WRITE) >= 0;
+}
+
+void copyPacketPayload(AVPacket* pkt, const std::vector<uint8_t>& data) {
+    if (!data.empty()) {
+        std::memcpy(pkt->data, data.data(), data.size());
+    }
+}
+
+void setPacketMetadata(AVPacket* pkt, const EncodedPacket& packet) noexcept {
+    pkt->stream_index = packet.streamIndex;
+    pkt->pts = packet.pts;
+    pkt->dts = packet.dts;
+    pkt->duration = packet.duration;
+    if (packet.isKeyFrame) {
+        pkt->flags = AV_PKT_FLAG_KEY;
+    }
+}
+
+AVPacketPtr buildAvPacket(const EncodedPacket& packet) {
+    AVPacketPtr pkt(av_packet_alloc());
+    if (!pkt) {
+        return nullptr;
+    }
+    if (av_new_packet(pkt.get(), static_cast<int>(packet.data.size())) < 0) {
+        return nullptr;
+    }
+    copyPacketPayload(pkt.get(), packet.data);
+    setPacketMetadata(pkt.get(), packet);
+    return pkt;
 }
 
 const AVCodec* findAudioEncoder(CodecId codec) noexcept {
@@ -164,6 +240,52 @@ AVSampleFormat selectSampleFormat(const AVCodec* codec) noexcept {
         }
     }
     return AV_SAMPLE_FMT_NONE;
+}
+
+bool isValidAudioConfig(const AudioEncodeConfig& config) noexcept {
+    return config.sampleRate > 0 && config.channels > 0;
+}
+
+int64_t resolveAudioBitrate(const AudioEncodeConfig& config) noexcept {
+    if (config.codec == CodecId::Opus && config.bitrateBps > 0) {
+        return config.bitrateBps;
+    }
+    return 0;
+}
+
+void configureAudioCodecContext(AVCodecContext* ctx, const AudioEncodeConfig& config, AVSampleFormat sampleFmt) {
+    ctx->sample_rate = config.sampleRate;
+    ctx->sample_fmt = sampleFmt;
+    ctx->time_base = AVRational{1, config.sampleRate};
+    ctx->bit_rate = resolveAudioBitrate(config);
+    av_channel_layout_default(&ctx->ch_layout, config.channels);
+}
+
+AVCodecContextPtr openAudioCodecContext(const AVCodec* codec, const AudioEncodeConfig& config, AVSampleFormat sampleFmt) {
+    AVCodecContextPtr ctx(avcodec_alloc_context3(codec));
+    if (!ctx) {
+        return nullptr;
+    }
+    configureAudioCodecContext(ctx.get(), config, sampleFmt);
+    if (avcodec_open2(ctx.get(), codec, nullptr) < 0) {
+        return nullptr;
+    }
+    return ctx;
+}
+
+void copyCodecExtradata(const AVCodecContext* ctx, std::vector<uint8_t>& out) {
+    if (ctx->extradata && ctx->extradata_size > 0) {
+        out.assign(ctx->extradata, ctx->extradata + ctx->extradata_size);
+    }
+}
+
+bool hasSufficientChannelSamples(const RawAudioBatch& batch) noexcept {
+    for (int32_t ch = 0; ch < batch.channels; ++ch) {
+        if (static_cast<int32_t>(batch.channelData[ch].size()) < batch.numSamples) {
+            return false;
+        }
+    }
+    return true;
 }
 
 int16_t floatToS16(float sample) noexcept {
@@ -234,6 +356,31 @@ bool writeSamplesToFrame(AVFrame* frame, const std::vector<std::vector<float>>& 
     return false;
 }
 
+AVFramePtr allocateAudioFrame(AVCodecContext* ctx, int32_t count, int64_t pts) {
+    AVFramePtr frame(av_frame_alloc());
+    if (!frame) {
+        return nullptr;
+    }
+    frame->nb_samples = count;
+    frame->format = ctx->sample_fmt;
+    frame->sample_rate = ctx->sample_rate;
+    av_channel_layout_copy(&frame->ch_layout, &ctx->ch_layout);
+    frame->pts = pts;
+    if (av_frame_get_buffer(frame.get(), 0) < 0) {
+        return nullptr;
+    }
+    if (av_frame_make_writable(frame.get()) < 0) {
+        return nullptr;
+    }
+    return frame;
+}
+
+void consumeFifoSamples(std::vector<std::vector<float>>& fifo, int32_t count) {
+    for (auto& chBuf : fifo) {
+        chBuf.erase(chBuf.begin(), chBuf.begin() + count);
+    }
+}
+
 CoreStatus drainEncoderPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& outPackets) {
     AVPacketPtr pkt(av_packet_alloc());
     if (!pkt) {
@@ -278,12 +425,36 @@ struct CoreMuxer::Impl {
         lastDtsPerStream.clear();
         hasPacketPerStream.clear();
     }
+
+    bool isReadyForPackets() const noexcept {
+        return formatCtx != nullptr && headerWritten;
+    }
+
+    bool isValidPacketOrder(const EncodedPacket& packet) const noexcept {
+        if (packet.streamIndex < 0) {
+            return false;
+        }
+        const auto idx = static_cast<size_t>(packet.streamIndex);
+        if (idx >= lastDtsPerStream.size()) {
+            return false;
+        }
+        if (!hasPacketPerStream[idx]) {
+            return true;
+        }
+        return packet.dts >= lastDtsPerStream[idx];
+    }
+
+    void recordPacketDts(int32_t streamIndex, int64_t dts) noexcept {
+        const auto idx = static_cast<size_t>(streamIndex);
+        lastDtsPerStream[idx] = dts;
+        hasPacketPerStream[idx] = true;
+    }
 };
 
 CoreMuxer::CoreMuxer() : impl_(std::make_unique<Impl>()) {}
 
 CoreMuxer::~CoreMuxer() {
-    if (impl_ && impl_->formatCtx && impl_->headerWritten) {
+    if (impl_ && impl_->isReadyForPackets()) {
         writeTrailerAndClose();
     }
 }
@@ -292,19 +463,19 @@ CoreMuxer::CoreMuxer(CoreMuxer&&) noexcept = default;
 CoreMuxer& CoreMuxer::operator=(CoreMuxer&&) noexcept = default;
 
 CoreStatus CoreMuxer::openContainer(const std::string& path, const std::string& formatName) {
-    if (path.empty() || !isSupportedContainerFormat(formatName)) {
+    if (path.empty()) {
+        return CoreStatus::InvalidArgument;
+    }
+    if (!isSupportedContainerFormat(formatName)) {
         return CoreStatus::InvalidArgument;
     }
     impl_->reset();
-    AVFormatContext* rawCtx = nullptr;
-    if (avformat_alloc_output_context2(&rawCtx, nullptr, formatName.c_str(), path.c_str()) < 0 || !rawCtx) {
+    AVFormatOutputPtr ctx = allocateOutputContext(path, formatName);
+    if (!ctx) {
         return CoreStatus::OpenFailed;
     }
-    AVFormatOutputPtr ctx(rawCtx);
-    if (!(ctx->oformat->flags & AVFMT_NOFILE)) {
-        if (avio_open(&ctx->pb, path.c_str(), AVIO_FLAG_WRITE) < 0) {
-            return CoreStatus::OpenFailed;
-        }
+    if (!openOutputIoIfNeeded(ctx.get(), path)) {
+        return CoreStatus::OpenFailed;
     }
     impl_->formatCtx = std::move(ctx);
     impl_->formatName = formatName;
@@ -345,33 +516,20 @@ CoreStatus CoreMuxer::writeHeader() {
 }
 
 CoreStatus CoreMuxer::writeInterleavedPacket(const EncodedPacket& packet) {
-    if (!impl_->formatCtx || !impl_->headerWritten) {
+    if (!impl_->isReadyForPackets()) {
         return CoreStatus::NotInitialized;
     }
-    const auto idx = static_cast<size_t>(packet.streamIndex);
-    if (packet.streamIndex < 0 || idx >= impl_->lastDtsPerStream.size()) {
+    if (!impl_->isValidPacketOrder(packet)) {
         return CoreStatus::InvalidArgument;
     }
-    if (impl_->hasPacketPerStream[idx] && packet.dts < impl_->lastDtsPerStream[idx]) {
-        return CoreStatus::InvalidArgument;
-    }
-    AVPacketPtr pkt(av_packet_alloc());
-    if (!pkt || av_new_packet(pkt.get(), static_cast<int>(packet.data.size())) < 0) {
+    AVPacketPtr pkt = buildAvPacket(packet);
+    if (!pkt) {
         return CoreStatus::EncodeFailed;
     }
-    if (!packet.data.empty()) {
-        std::memcpy(pkt->data, packet.data.data(), packet.data.size());
-    }
-    pkt->stream_index = packet.streamIndex;
-    pkt->pts = packet.pts;
-    pkt->dts = packet.dts;
-    pkt->duration = packet.duration;
-    pkt->flags = packet.isKeyFrame ? AV_PKT_FLAG_KEY : 0;
     if (av_interleaved_write_frame(impl_->formatCtx.get(), pkt.get()) < 0) {
         return CoreStatus::EncodeFailed;
     }
-    impl_->lastDtsPerStream[idx] = packet.dts;
-    impl_->hasPacketPerStream[idx] = true;
+    impl_->recordPacketDts(packet.streamIndex, packet.dts);
     return CoreStatus::Ok;
 }
 
@@ -405,30 +563,67 @@ struct CoreAudioEncoder::Impl {
         nextPts = 0;
     }
 
-    CoreStatus encodeChunk(int32_t count, std::vector<EncodedPacket>& outPackets) {
-        AVFramePtr frame(av_frame_alloc());
-        if (!frame) {
-            return CoreStatus::EncodeFailed;
+    void applyInitializedState(const AudioEncodeConfig& cfg, AVCodecContextPtr ctx) {
+        reset();
+        config = cfg;
+        fifo.assign(static_cast<size_t>(cfg.channels), {});
+        copyCodecExtradata(ctx.get(), extradata);
+        codecCtx = std::move(ctx);
+    }
+
+    bool isValidAudioBatch(const RawAudioBatch& batch) const noexcept {
+        if (batch.numSamples <= 0 || batch.channels != config.channels) {
+            return false;
         }
-        frame->nb_samples = count;
-        frame->format = codecCtx->sample_fmt;
-        frame->sample_rate = codecCtx->sample_rate;
-        av_channel_layout_copy(&frame->ch_layout, &codecCtx->ch_layout);
-        frame->pts = nextPts;
-        if (av_frame_get_buffer(frame.get(), 0) < 0 || av_frame_make_writable(frame.get()) < 0) {
+        if (static_cast<int32_t>(batch.channelData.size()) < batch.channels) {
+            return false;
+        }
+        return hasSufficientChannelSamples(batch);
+    }
+
+    void appendBatchToFifo(const RawAudioBatch& batch) {
+        for (int32_t ch = 0; ch < batch.channels; ++ch) {
+            fifo[ch].insert(fifo[ch].end(),
+                           batch.channelData[ch].begin(),
+                           batch.channelData[ch].begin() + batch.numSamples);
+        }
+    }
+
+    int32_t resolveFrameSize() const noexcept {
+        if (codecCtx->frame_size > 0) {
+            return codecCtx->frame_size;
+        }
+        return static_cast<int32_t>(fifo[0].size());
+    }
+
+    CoreStatus encodeChunk(int32_t count, std::vector<EncodedPacket>& outPackets) {
+        AVFramePtr frame = allocateAudioFrame(codecCtx.get(), count, nextPts);
+        if (!frame) {
             return CoreStatus::EncodeFailed;
         }
         if (!writeSamplesToFrame(frame.get(), fifo, count)) {
             return CoreStatus::EncodeFailed;
         }
-        for (auto& chBuf : fifo) {
-            chBuf.erase(chBuf.begin(), chBuf.begin() + count);
-        }
+        consumeFifoSamples(fifo, count);
         nextPts += count;
         if (avcodec_send_frame(codecCtx.get(), frame.get()) < 0) {
             return CoreStatus::EncodeFailed;
         }
         return drainEncoderPackets(codecCtx.get(), outPackets);
+    }
+
+    CoreStatus encodeAvailableChunks(std::vector<EncodedPacket>& outPackets) {
+        const int32_t frameSize = resolveFrameSize();
+        if (frameSize <= 0) {
+            return CoreStatus::Ok;
+        }
+        while (static_cast<int32_t>(fifo[0].size()) >= frameSize) {
+            CoreStatus st = encodeChunk(frameSize, outPackets);
+            if (st != CoreStatus::Ok) {
+                return st;
+            }
+        }
+        return CoreStatus::Ok;
     }
 };
 
@@ -438,7 +633,7 @@ CoreAudioEncoder::CoreAudioEncoder(CoreAudioEncoder&&) noexcept = default;
 CoreAudioEncoder& CoreAudioEncoder::operator=(CoreAudioEncoder&&) noexcept = default;
 
 CoreStatus CoreAudioEncoder::initialize(const AudioEncodeConfig& config) {
-    if (config.sampleRate <= 0 || config.channels <= 0) {
+    if (!isValidAudioConfig(config)) {
         return CoreStatus::InvalidArgument;
     }
     const AVCodec* codec = findAudioEncoder(config.codec);
@@ -449,25 +644,11 @@ CoreStatus CoreAudioEncoder::initialize(const AudioEncodeConfig& config) {
     if (sampleFmt == AV_SAMPLE_FMT_NONE) {
         return CoreStatus::UnsupportedCodec;
     }
-    AVCodecContextPtr ctx(avcodec_alloc_context3(codec));
+    AVCodecContextPtr ctx = openAudioCodecContext(codec, config, sampleFmt);
     if (!ctx) {
         return CoreStatus::OpenFailed;
     }
-    ctx->sample_rate = config.sampleRate;
-    ctx->sample_fmt = sampleFmt;
-    ctx->time_base = AVRational{1, config.sampleRate};
-    ctx->bit_rate = (config.codec == CodecId::Opus && config.bitrateBps > 0) ? config.bitrateBps : 0;
-    av_channel_layout_default(&ctx->ch_layout, config.channels);
-    if (avcodec_open2(ctx.get(), codec, nullptr) < 0) {
-        return CoreStatus::OpenFailed;
-    }
-    impl_->reset();
-    impl_->config = config;
-    impl_->fifo.assign(static_cast<size_t>(config.channels), {});
-    if (ctx->extradata && ctx->extradata_size > 0) {
-        impl_->extradata.assign(ctx->extradata, ctx->extradata + ctx->extradata_size);
-    }
-    impl_->codecCtx = std::move(ctx);
+    impl_->applyInitializedState(config, std::move(ctx));
     return CoreStatus::Ok;
 }
 
@@ -475,28 +656,11 @@ CoreStatus CoreAudioEncoder::encodeAudio(const RawAudioBatch& batch, std::vector
     if (!impl_->codecCtx) {
         return CoreStatus::NotInitialized;
     }
-    if (batch.numSamples <= 0 || batch.channels != impl_->config.channels ||
-        static_cast<int32_t>(batch.channelData.size()) < batch.channels) {
+    if (!impl_->isValidAudioBatch(batch)) {
         return CoreStatus::InvalidArgument;
     }
-    for (int32_t ch = 0; ch < batch.channels; ++ch) {
-        if (static_cast<int32_t>(batch.channelData[ch].size()) < batch.numSamples) {
-            return CoreStatus::InvalidArgument;
-        }
-        impl_->fifo[ch].insert(impl_->fifo[ch].end(),
-                               batch.channelData[ch].begin(),
-                               batch.channelData[ch].begin() + batch.numSamples);
-    }
-    const int32_t frameSize = impl_->codecCtx->frame_size > 0
-        ? impl_->codecCtx->frame_size
-        : static_cast<int32_t>(impl_->fifo[0].size());
-    while (static_cast<int32_t>(impl_->fifo[0].size()) >= frameSize && frameSize > 0) {
-        CoreStatus st = impl_->encodeChunk(frameSize, outPackets);
-        if (st != CoreStatus::Ok) {
-            return st;
-        }
-    }
-    return CoreStatus::Ok;
+    impl_->appendBatchToFifo(batch);
+    return impl_->encodeAvailableChunks(outPackets);
 }
 
 CoreStatus CoreAudioEncoder::flush(std::vector<EncodedPacket>& outPackets) {
