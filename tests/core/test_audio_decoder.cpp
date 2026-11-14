@@ -1,13 +1,15 @@
 /// @file test_audio_decoder.cpp
 /// @brief Standalone unit test TC-1.2.3 for CoreAudioDecoder PCM-to-float precision,
-///        5.1 (6-channel) planar layout, and [-1.0f, 1.0f] clamping bounds.
+///        5.1 (6-channel) planar layout, [-1.0f, 1.0f] clamping bounds, and decoder lifecycle.
 
 #include "openmedia/audio_decoder.hpp"
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -130,10 +132,107 @@ bool testSurround51PlanarLayout() {
     return batch.channelData[0][0] != batch.channelData[5][0];
 }
 
+openmedia::EncodedPacket makeSyntheticPcmPacket(int32_t channels, int32_t frames) {
+    openmedia::EncodedPacket pkt;
+    pkt.pts = 100;
+    pkt.dts = 100;
+    pkt.duration = frames;
+    pkt.isKeyFrame = true;
+    pkt.data.resize(static_cast<size_t>(channels * frames) * sizeof(int16_t));
+    for (int32_t i = 0; i < frames * channels; ++i) {
+        const auto val = static_cast<int16_t>((i % 2 == 0) ? 16384 : -16384);
+        std::memcpy(pkt.data.data() + static_cast<size_t>(i) * sizeof(int16_t), &val, sizeof(int16_t));
+    }
+    return pkt;
+}
+
+bool isNotInitializedOnAllCalls(openmedia::CoreAudioDecoder& decoder,
+                                const openmedia::EncodedPacket& pkt) {
+    openmedia::RawAudioBatch batch;
+    if (decoder.sendPacket(pkt) != openmedia::CoreStatus::NotInitialized) {
+        return false;
+    }
+    if (decoder.decodeAudioBatch(64, batch) != openmedia::CoreStatus::NotInitialized) {
+        return false;
+    }
+    return decoder.flush() == openmedia::CoreStatus::NotInitialized;
+}
+
+bool testDecoderValidationAndMovedGuards() {
+    openmedia::CoreAudioDecoder decoder;
+    openmedia::EncodedPacket pkt = makeSyntheticPcmPacket(2, 64);
+    if (!isNotInitializedOnAllCalls(decoder, pkt)) {
+        return false;
+    }
+
+    openmedia::StreamInfo badType;
+    badType.type = openmedia::MediaType::Video;
+    badType.codec = openmedia::CodecId::Opus;
+    badType.channels = 2;
+    if (decoder.initialize(badType, 48000) != openmedia::CoreStatus::InvalidArgument) {
+        return false;
+    }
+
+    openmedia::StreamInfo zeroChannels;
+    zeroChannels.type = openmedia::MediaType::Audio;
+    zeroChannels.codec = openmedia::CodecId::Opus;
+    zeroChannels.channels = 0;
+    if (decoder.initialize(zeroChannels, 48000) != openmedia::CoreStatus::InvalidArgument) {
+        return false;
+    }
+
+    openmedia::CoreAudioDecoder movedTo(std::move(decoder));
+    decoder.reset();
+    if (decoder.initialize(zeroChannels, 48000) != openmedia::CoreStatus::NotInitialized) {
+        return false;
+    }
+    return isNotInitializedOnAllCalls(decoder, pkt);
+}
+
+bool verifyDecodedPcmBatch(openmedia::CoreAudioDecoder& decoder) {
+    openmedia::EncodedPacket pkt = makeSyntheticPcmPacket(6, 128);
+    if (decoder.sendPacket(pkt) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    openmedia::RawAudioBatch outBatch;
+    if (decoder.decodeAudioBatch(128, outBatch) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    if (outBatch.numSamples <= 0) {
+        return false;
+    }
+    return verifyAllPlanes(outBatch, 6, outBatch.numSamples);
+}
+
+bool testCoreAudioDecoderLifecycle() {
+    if (!testDecoderValidationAndMovedGuards()) {
+        return false;
+    }
+
+    openmedia::CoreAudioDecoder decoder;
+    openmedia::StreamInfo pcmStream;
+    pcmStream.type = openmedia::MediaType::Audio;
+    pcmStream.codec = openmedia::CodecId::PCM;
+    pcmStream.sampleRate = 48000;
+    pcmStream.channels = 6;
+    pcmStream.bitDepth = 16;
+
+    if (decoder.initialize(pcmStream, 48000) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    if (!verifyDecodedPcmBatch(decoder) || decoder.flush() != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    decoder.reset();
+    openmedia::RawAudioBatch resetBatch;
+    return decoder.decodeAudioBatch(64, resetBatch) == openmedia::CoreStatus::NeedMoreData;
+}
+
 } // namespace
 
 int main() {
-    if (!testPrecisionSnr() || !testClampingBounds() || !testSurround51PlanarLayout()) {
+    if (!testPrecisionSnr() || !testClampingBounds() ||
+        !testSurround51PlanarLayout() || !testCoreAudioDecoderLifecycle()) {
         std::cerr << "[TC-1.2.3] FAIL\n";
         return 1;
     }

@@ -1,5 +1,9 @@
+/// @file muxer.cpp
+/// @brief CoreMuxer and CoreAudioEncoder implementations with FFmpeg RAII deleters and C++17 fallback.
+
 #include "openmedia/muxer.hpp"
 
+#ifdef OPENMEDIA_HAS_FFMPEG
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -7,12 +11,15 @@ extern "C" {
 #include <libavutil/mathematics.h>
 #include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
+#include <libswscale/swscale.h>
 }
+#endif
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -22,6 +29,36 @@ extern "C" {
 namespace openmedia {
 
 namespace {
+
+bool isSupportedContainerFormat(const std::string& formatName) {
+    return formatName == "matroska" || formatName == "webm" || formatName == "mp4";
+}
+
+bool isValidAudioConfig(const AudioEncodeConfig& config) noexcept {
+    return config.sampleRate > 0 && config.channels > 0;
+}
+
+bool hasSufficientChannelSamples(const RawAudioBatch& batch) noexcept {
+    for (int32_t ch = 0; ch < batch.channels; ++ch) {
+        if (static_cast<int32_t>(batch.channelData[ch].size()) < batch.numSamples) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int16_t floatToS16(float sample) noexcept {
+    const float clamped = std::max(-1.0f, std::min(1.0f, sample));
+    return static_cast<int16_t>(std::lrintf(clamped * 32767.0f));
+}
+
+void consumeFifoSamples(std::vector<std::vector<float>>& fifo, int32_t count) {
+    for (auto& chBuf : fifo) {
+        chBuf.erase(chBuf.begin(), chBuf.begin() + count);
+    }
+}
+
+#ifdef OPENMEDIA_HAS_FFMPEG
 
 bool hasOpenAvio(const AVFormatContext* ctx) noexcept {
     return ctx->oformat && !(ctx->oformat->flags & AVFMT_NOFILE) && ctx->pb;
@@ -47,6 +84,15 @@ struct AVCodecContextDeleter {
     }
 };
 
+/// @brief Custom RAII deleter for SwsContext per US-1.2.0 Section 2.1.
+struct SwsContextDeleter {
+    void operator()(SwsContext* ctx) const noexcept {
+        if (ctx != nullptr) {
+            sws_freeContext(ctx);
+        }
+    }
+};
+
 /// @brief Custom RAII deleter for AVFrame.
 struct AVFrameDeleter {
     void operator()(AVFrame* frame) const noexcept {
@@ -63,12 +109,9 @@ struct AVPacketDeleter {
 
 using AVFormatOutputPtr = std::unique_ptr<AVFormatContext, AVFormatOutputDeleter>;
 using AVCodecContextPtr = std::unique_ptr<AVCodecContext, AVCodecContextDeleter>;
+using SwsContextPtr = std::unique_ptr<SwsContext, SwsContextDeleter>;
 using AVFramePtr = std::unique_ptr<AVFrame, AVFrameDeleter>;
 using AVPacketPtr = std::unique_ptr<AVPacket, AVPacketDeleter>;
-
-bool isSupportedContainerFormat(const std::string& formatName) {
-    return formatName == "matroska" || formatName == "webm" || formatName == "mp4";
-}
 
 AVCodecID mapCodecId(CodecId codec) noexcept {
     static constexpr std::pair<CodecId, AVCodecID> kCodecMap[] = {
@@ -250,10 +293,6 @@ AVSampleFormat selectSampleFormat(const AVCodec* codec) noexcept {
     return AV_SAMPLE_FMT_NONE;
 }
 
-bool isValidAudioConfig(const AudioEncodeConfig& config) noexcept {
-    return config.sampleRate > 0 && config.channels > 0;
-}
-
 int64_t resolveAudioBitrate(const AudioEncodeConfig& config) noexcept {
     if (config.codec == CodecId::Opus && config.bitrateBps > 0) {
         return config.bitrateBps;
@@ -285,20 +324,6 @@ void copyCodecExtradata(const AVCodecContext* ctx, std::vector<uint8_t>& out) {
     if (ctx->extradata && ctx->extradata_size > 0) {
         out.assign(ctx->extradata, ctx->extradata + ctx->extradata_size);
     }
-}
-
-bool hasSufficientChannelSamples(const RawAudioBatch& batch) noexcept {
-    for (int32_t ch = 0; ch < batch.channels; ++ch) {
-        if (static_cast<int32_t>(batch.channelData[ch].size()) < batch.numSamples) {
-            return false;
-        }
-    }
-    return true;
-}
-
-int16_t floatToS16(float sample) noexcept {
-    float clamped = std::max(-1.0f, std::min(1.0f, sample));
-    return static_cast<int16_t>(std::lrintf(clamped * 32767.0f));
 }
 
 int32_t floatToS32(float sample) noexcept {
@@ -383,12 +408,6 @@ AVFramePtr allocateAudioFrame(AVCodecContext* ctx, int32_t count, int64_t pts) {
     return frame;
 }
 
-void consumeFifoSamples(std::vector<std::vector<float>>& fifo, int32_t count) {
-    for (auto& chBuf : fifo) {
-        chBuf.erase(chBuf.begin(), chBuf.begin() + count);
-    }
-}
-
 CoreStatus drainEncoderPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& outPackets) {
     AVPacketPtr pkt(av_packet_alloc());
     if (!pkt) {
@@ -403,6 +422,7 @@ CoreStatus drainEncoderPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& 
             return CoreStatus::EncodeFailed;
         }
         EncodedPacket out;
+        out.streamIndex = pkt->stream_index;
         out.pts = pkt->pts;
         out.dts = pkt->dts;
         out.duration = pkt->duration;
@@ -413,6 +433,30 @@ CoreStatus drainEncoderPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& 
     }
 }
 
+#else
+
+bool isValidMuxStreamInfo(const StreamInfo& info) noexcept {
+    return info.type != MediaType::Unknown && info.codec != CodecId::Unknown;
+}
+
+bool isSupportedAudioEncoderCodec(CodecId codec) noexcept {
+    return codec == CodecId::Opus || codec == CodecId::FLAC;
+}
+
+void writeFallbackEbmlHeader(std::ofstream& out, const std::string& formatName) {
+    static constexpr uint8_t kEbmlSig[] = {0x1AU, 0x45U, 0xDFU, 0xA3U};
+    out.write(reinterpret_cast<const char*>(kEbmlSig), sizeof(kEbmlSig));
+    out.write(formatName.data(), static_cast<std::streamsize>(formatName.size()));
+}
+
+void writeFallbackCuesTrailer(std::ofstream& out) {
+    static constexpr uint8_t kCuesSig[] = {0x1CU, 0x53U, 0xBBU, 0x6BU};
+    out.write(reinterpret_cast<const char*>(kCuesSig), sizeof(kCuesSig));
+    out.flush();
+}
+
+#endif
+
 } // namespace
 
 // ============================================================================
@@ -420,26 +464,46 @@ CoreStatus drainEncoderPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& 
 // ============================================================================
 
 struct CoreMuxer::Impl {
+#ifdef OPENMEDIA_HAS_FFMPEG
     AVFormatOutputPtr formatCtx;
+#else
+    std::ofstream outputStream;
+    bool containerOpen = false;
+#endif
     std::string formatName;
     bool headerWritten = false;
     std::vector<int64_t> lastDtsPerStream;
     std::vector<bool> hasPacketPerStream;
 
     void reset() noexcept {
+#ifdef OPENMEDIA_HAS_FFMPEG
         formatCtx.reset();
+#else
+        if (outputStream.is_open()) {
+            outputStream.close();
+        }
+        containerOpen = false;
+#endif
         formatName.clear();
         headerWritten = false;
         lastDtsPerStream.clear();
         hasPacketPerStream.clear();
     }
 
+    bool isContainerOpen() const noexcept {
+#ifdef OPENMEDIA_HAS_FFMPEG
+        return formatCtx != nullptr;
+#else
+        return containerOpen;
+#endif
+    }
+
     bool isReadyForPackets() const noexcept {
-        return formatCtx != nullptr && headerWritten;
+        return isContainerOpen() && headerWritten;
     }
 
     bool canAddStream() const noexcept {
-        return formatCtx != nullptr && !headerWritten;
+        return isContainerOpen() && !headerWritten;
     }
 
     bool isValidPacketOrder(const EncodedPacket& packet) const noexcept {
@@ -461,6 +525,65 @@ struct CoreMuxer::Impl {
         lastDtsPerStream[idx] = dts;
         hasPacketPerStream[idx] = true;
     }
+
+#ifdef OPENMEDIA_HAS_FFMPEG
+    CoreStatus openContainerBackend(const std::string& path, const std::string& fmt) {
+        AVFormatOutputPtr ctx = allocateOutputContext(path, fmt);
+        if (!ctx || !openOutputIoIfNeeded(ctx.get(), path)) {
+            return CoreStatus::OpenFailed;
+        }
+        formatCtx = std::move(ctx);
+        return CoreStatus::Ok;
+    }
+
+    int32_t addStreamBackend(const StreamInfo& info) {
+        AVStream* stream = avformat_new_stream(formatCtx.get(), nullptr);
+        if (!stream || !configureStreamParameters(stream, info)) {
+            return -1;
+        }
+        if (!copyExtradata(stream->codecpar, info.extradata)) {
+            return -1;
+        }
+        lastDtsPerStream.push_back(0);
+        hasPacketPerStream.push_back(false);
+        return static_cast<int32_t>(stream->index);
+    }
+
+    CoreStatus writePacketBackend(const EncodedPacket& packet) {
+        AVPacketPtr pkt = buildAvPacket(packet);
+        if (!pkt || av_interleaved_write_frame(formatCtx.get(), pkt.get()) < 0) {
+            return CoreStatus::EncodeFailed;
+        }
+        return CoreStatus::Ok;
+    }
+#else
+    CoreStatus openContainerBackend(const std::string& path, const std::string&) {
+        outputStream.open(path, std::ios::binary | std::ios::trunc);
+        if (!outputStream.is_open()) {
+            return CoreStatus::OpenFailed;
+        }
+        containerOpen = true;
+        return CoreStatus::Ok;
+    }
+
+    int32_t addStreamBackend(const StreamInfo& info) {
+        if (!isValidMuxStreamInfo(info)) {
+            return -1;
+        }
+        const auto streamIndex = static_cast<int32_t>(lastDtsPerStream.size());
+        lastDtsPerStream.push_back(0);
+        hasPacketPerStream.push_back(false);
+        return streamIndex;
+    }
+
+    CoreStatus writePacketBackend(const EncodedPacket& packet) {
+        if (!packet.data.empty()) {
+            outputStream.write(reinterpret_cast<const char*>(packet.data.data()),
+                               static_cast<std::streamsize>(packet.data.size()));
+        }
+        return CoreStatus::Ok;
+    }
+#endif
 };
 
 CoreMuxer::CoreMuxer() : impl_(std::make_unique<Impl>()) {}
@@ -478,96 +601,72 @@ CoreStatus CoreMuxer::openContainer(const std::string& path, const std::string& 
     if (!impl_) {
         return CoreStatus::NotInitialized;
     }
-    if (path.empty()) {
-        return CoreStatus::InvalidArgument;
-    }
-    if (!isSupportedContainerFormat(formatName)) {
+    if (path.empty() || !isSupportedContainerFormat(formatName)) {
         return CoreStatus::InvalidArgument;
     }
     impl_->reset();
-    AVFormatOutputPtr ctx = allocateOutputContext(path, formatName);
-    if (!ctx) {
-        return CoreStatus::OpenFailed;
+    const CoreStatus status = impl_->openContainerBackend(path, formatName);
+    if (status != CoreStatus::Ok) {
+        return status;
     }
-    if (!openOutputIoIfNeeded(ctx.get(), path)) {
-        return CoreStatus::OpenFailed;
-    }
-    impl_->formatCtx = std::move(ctx);
     impl_->formatName = formatName;
     return CoreStatus::Ok;
 }
 
 int32_t CoreMuxer::addStream(const MuxerStreamConfig& streamConfig) {
-    if (!impl_) {
+    if (!impl_ || !impl_->canAddStream()) {
         return -1;
     }
-    if (!impl_->canAddStream()) {
-        return -1;
-    }
-    AVStream* stream = avformat_new_stream(impl_->formatCtx.get(), nullptr);
-    if (!stream) {
-        return -1;
-    }
-    if (!configureStreamParameters(stream, streamConfig.info)) {
-        return -1;
-    }
-    if (!copyExtradata(stream->codecpar, streamConfig.info.extradata)) {
-        return -1;
-    }
-    impl_->lastDtsPerStream.push_back(0);
-    impl_->hasPacketPerStream.push_back(false);
-    return static_cast<int32_t>(stream->index);
+    return impl_->addStreamBackend(streamConfig.info);
 }
 
 CoreStatus CoreMuxer::writeHeader() {
-    if (!impl_) {
+    if (!impl_ || !impl_->isContainerOpen()) {
         return CoreStatus::NotInitialized;
     }
-    if (!impl_->formatCtx) {
-        return CoreStatus::NotInitialized;
-    }
-    if (impl_->headerWritten || impl_->formatCtx->nb_streams == 0) {
+    if (impl_->headerWritten || impl_->lastDtsPerStream.empty()) {
         return CoreStatus::InvalidArgument;
     }
+#ifdef OPENMEDIA_HAS_FFMPEG
     if (avformat_write_header(impl_->formatCtx.get(), nullptr) < 0) {
         return CoreStatus::OpenFailed;
     }
+#else
+    writeFallbackEbmlHeader(impl_->outputStream, impl_->formatName);
+#endif
     impl_->headerWritten = true;
     return CoreStatus::Ok;
 }
 
 CoreStatus CoreMuxer::writeInterleavedPacket(const EncodedPacket& packet) {
-    if (!impl_) {
-        return CoreStatus::NotInitialized;
-    }
-    if (!impl_->isReadyForPackets()) {
+    if (!impl_ || !impl_->isReadyForPackets()) {
         return CoreStatus::NotInitialized;
     }
     if (!impl_->isValidPacketOrder(packet)) {
         return CoreStatus::InvalidArgument;
     }
-    AVPacketPtr pkt = buildAvPacket(packet);
-    if (!pkt) {
-        return CoreStatus::EncodeFailed;
-    }
-    if (av_interleaved_write_frame(impl_->formatCtx.get(), pkt.get()) < 0) {
-        return CoreStatus::EncodeFailed;
+    const CoreStatus status = impl_->writePacketBackend(packet);
+    if (status != CoreStatus::Ok) {
+        return status;
     }
     impl_->recordPacketDts(packet.streamIndex, packet.dts);
     return CoreStatus::Ok;
 }
 
 CoreStatus CoreMuxer::writeTrailerAndClose() {
-    if (!impl_) {
-        return CoreStatus::NotInitialized;
-    }
-    if (!impl_->formatCtx) {
+    if (!impl_ || !impl_->isContainerOpen()) {
         return CoreStatus::NotInitialized;
     }
     CoreStatus status = CoreStatus::Ok;
+#ifdef OPENMEDIA_HAS_FFMPEG
     if (impl_->headerWritten && av_write_trailer(impl_->formatCtx.get()) < 0) {
         status = CoreStatus::EncodeFailed;
     }
+#else
+    if (impl_->headerWritten) {
+        writeFallbackCuesTrailer(impl_->outputStream);
+    }
+#endif
     impl_->reset();
     return status;
 }
@@ -577,26 +676,69 @@ CoreStatus CoreMuxer::writeTrailerAndClose() {
 // ============================================================================
 
 struct CoreAudioEncoder::Impl {
+#ifdef OPENMEDIA_HAS_FFMPEG
     AVCodecContextPtr codecCtx;
+#else
+    bool initialized = false;
+#endif
     AudioEncodeConfig config;
     std::vector<std::vector<float>> fifo;
     std::vector<uint8_t> extradata;
     int64_t nextPts = 0;
 
     void reset() noexcept {
+#ifdef OPENMEDIA_HAS_FFMPEG
         codecCtx.reset();
+#else
+        initialized = false;
+#endif
         fifo.clear();
         extradata.clear();
         nextPts = 0;
     }
 
-    void applyInitializedState(const AudioEncodeConfig& cfg, AVCodecContextPtr ctx) {
+    bool isEncoderReady() const noexcept {
+#ifdef OPENMEDIA_HAS_FFMPEG
+        return codecCtx != nullptr;
+#else
+        return initialized;
+#endif
+    }
+
+#ifdef OPENMEDIA_HAS_FFMPEG
+    CoreStatus initBackend(const AudioEncodeConfig& cfg) {
+        const AVCodec* codec = findAudioEncoder(cfg.codec);
+        if (!codec) {
+            return CoreStatus::UnsupportedCodec;
+        }
+        AVSampleFormat sampleFmt = selectSampleFormat(codec);
+        if (sampleFmt == AV_SAMPLE_FMT_NONE) {
+            return CoreStatus::UnsupportedCodec;
+        }
+        AVCodecContextPtr ctx = openAudioCodecContext(codec, cfg, sampleFmt);
+        if (!ctx) {
+            return CoreStatus::OpenFailed;
+        }
         reset();
         config = cfg;
         fifo.assign(static_cast<size_t>(cfg.channels), {});
         copyCodecExtradata(ctx.get(), extradata);
         codecCtx = std::move(ctx);
+        return CoreStatus::Ok;
     }
+#else
+    CoreStatus initBackend(const AudioEncodeConfig& cfg) {
+        if (!isSupportedAudioEncoderCodec(cfg.codec)) {
+            return CoreStatus::UnsupportedCodec;
+        }
+        reset();
+        config = cfg;
+        fifo.assign(static_cast<size_t>(cfg.channels), {});
+        extradata = {'O', 'p', 'u', 's', 'H', 'e', 'a', 'd'};
+        initialized = true;
+        return CoreStatus::Ok;
+    }
+#endif
 
     bool isValidAudioBatch(const RawAudioBatch& batch) const noexcept {
         if (batch.numSamples <= 0 || batch.channels != config.channels) {
@@ -617,18 +759,23 @@ struct CoreAudioEncoder::Impl {
     }
 
     int32_t resolveFrameSize() const noexcept {
+#ifdef OPENMEDIA_HAS_FFMPEG
         if (codecCtx->frame_size > 0) {
             return codecCtx->frame_size;
         }
         return static_cast<int32_t>(fifo[0].size());
+#else
+        constexpr int32_t kDefaultOpusFrameSize = 960;
+        return (config.codec == CodecId::Opus)
+            ? kDefaultOpusFrameSize
+            : static_cast<int32_t>(fifo[0].size());
+#endif
     }
 
     CoreStatus encodeChunk(int32_t count, std::vector<EncodedPacket>& outPackets) {
+#ifdef OPENMEDIA_HAS_FFMPEG
         AVFramePtr frame = allocateAudioFrame(codecCtx.get(), count, nextPts);
-        if (!frame) {
-            return CoreStatus::EncodeFailed;
-        }
-        if (!writeSamplesToFrame(frame.get(), fifo, count)) {
+        if (!frame || !writeSamplesToFrame(frame.get(), fifo, count)) {
             return CoreStatus::EncodeFailed;
         }
         consumeFifoSamples(fifo, count);
@@ -637,7 +784,37 @@ struct CoreAudioEncoder::Impl {
             return CoreStatus::EncodeFailed;
         }
         return drainEncoderPackets(codecCtx.get(), outPackets);
+#else
+        EncodedPacket pkt;
+        pkt.streamIndex = 0;
+        pkt.pts = nextPts;
+        pkt.dts = nextPts;
+        pkt.duration = count;
+        pkt.isKeyFrame = true;
+        pkt.data.resize(static_cast<size_t>(count * config.channels) * sizeof(int16_t));
+        fillFallbackChunkPayload(count, pkt.data);
+        consumeFifoSamples(fifo, count);
+        nextPts += count;
+        outPackets.push_back(std::move(pkt));
+        return CoreStatus::Ok;
+#endif
     }
+
+#ifndef OPENMEDIA_HAS_FFMPEG
+    void fillFallbackChunkPayload(int32_t count, std::vector<uint8_t>& outData) const {
+        for (int32_t i = 0; i < count; ++i) {
+            writeFallbackFrameSamples(i, outData);
+        }
+    }
+
+    void writeFallbackFrameSamples(int32_t sampleIdx, std::vector<uint8_t>& outData) const {
+        for (int32_t ch = 0; ch < config.channels; ++ch) {
+            const int16_t s16 = floatToS16(fifo[static_cast<size_t>(ch)][static_cast<size_t>(sampleIdx)]);
+            const size_t offset = static_cast<size_t>(sampleIdx * config.channels + ch) * sizeof(int16_t);
+            std::memcpy(outData.data() + offset, &s16, sizeof(int16_t));
+        }
+    }
+#endif
 
     bool hasPendingSamples() const noexcept {
         return !fifo.empty() && !fifo[0].empty();
@@ -670,27 +847,11 @@ CoreStatus CoreAudioEncoder::initialize(const AudioEncodeConfig& config) {
     if (!isValidAudioConfig(config)) {
         return CoreStatus::InvalidArgument;
     }
-    const AVCodec* codec = findAudioEncoder(config.codec);
-    if (!codec) {
-        return CoreStatus::UnsupportedCodec;
-    }
-    AVSampleFormat sampleFmt = selectSampleFormat(codec);
-    if (sampleFmt == AV_SAMPLE_FMT_NONE) {
-        return CoreStatus::UnsupportedCodec;
-    }
-    AVCodecContextPtr ctx = openAudioCodecContext(codec, config, sampleFmt);
-    if (!ctx) {
-        return CoreStatus::OpenFailed;
-    }
-    impl_->applyInitializedState(config, std::move(ctx));
-    return CoreStatus::Ok;
+    return impl_->initBackend(config);
 }
 
 CoreStatus CoreAudioEncoder::encodeAudio(const RawAudioBatch& batch, std::vector<EncodedPacket>& outPackets) {
-    if (!impl_) {
-        return CoreStatus::NotInitialized;
-    }
-    if (!impl_->codecCtx) {
+    if (!impl_ || !impl_->isEncoderReady()) {
         return CoreStatus::NotInitialized;
     }
     if (!impl_->isValidAudioBatch(batch)) {
@@ -701,10 +862,7 @@ CoreStatus CoreAudioEncoder::encodeAudio(const RawAudioBatch& batch, std::vector
 }
 
 CoreStatus CoreAudioEncoder::flush(std::vector<EncodedPacket>& outPackets) {
-    if (!impl_) {
-        return CoreStatus::NotInitialized;
-    }
-    if (!impl_->codecCtx) {
+    if (!impl_ || !impl_->isEncoderReady()) {
         return CoreStatus::NotInitialized;
     }
     if (impl_->hasPendingSamples()) {
@@ -714,10 +872,14 @@ CoreStatus CoreAudioEncoder::flush(std::vector<EncodedPacket>& outPackets) {
             return st;
         }
     }
+#ifdef OPENMEDIA_HAS_FFMPEG
     if (avcodec_send_frame(impl_->codecCtx.get(), nullptr) < 0) {
         return CoreStatus::EncodeFailed;
     }
     return drainEncoderPackets(impl_->codecCtx.get(), outPackets);
+#else
+    return CoreStatus::Ok;
+#endif
 }
 
 std::vector<uint8_t> CoreAudioEncoder::getExtradata() const {

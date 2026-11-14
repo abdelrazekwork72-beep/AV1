@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstdint>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 using namespace openmedia;
@@ -88,6 +89,12 @@ void testConfigValidationAndGuards() {
     VideoEncodeConfig badFps;
     badFps.frameRate = RationalTime{0, 0};
     assert(encoder.initialize(badFps) == CoreStatus::InvalidArgument);
+
+    CoreVideoEncoder movedEncoder(std::move(encoder));
+    assert(encoder.initialize(VideoEncodeConfig{}) == CoreStatus::NotInitialized);
+    assert(encoder.encodeFrame(dummy, packets) == CoreStatus::NotInitialized);
+    assert(encoder.flush(packets) == CoreStatus::NotInitialized);
+    assert(encoder.getExtradata().empty());
 }
 
 void testEncodeAndFlushGop() {
@@ -110,6 +117,10 @@ void testEncodeAndFlushGop() {
     std::vector<EncodedPacket> packets;
     RawVideoFrame mismatched = makeSynthetic10BitFrame(64, 64, 0);
     assert(encoder.encodeFrame(mismatched, packets) == CoreStatus::InvalidArgument);
+
+    RawVideoFrame narrowStride = makeSynthetic10BitFrame(128, 128, 0);
+    narrowStride.rowBytes[0] = 64U;
+    assert(encoder.encodeFrame(narrowStride, packets) == CoreStatus::InvalidArgument);
 
     constexpr int32_t kFrameCount = 6;
     for (int32_t i = 0; i < kFrameCount; ++i) {

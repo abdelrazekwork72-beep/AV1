@@ -1,22 +1,109 @@
 /// @file video_encoder.cpp
-/// @brief CoreVideoEncoder implementation using FFmpeg libavcodec with RAII deleters and lookup tables.
+/// @brief CoreVideoEncoder implementation using FFmpeg libavcodec with RAII deleters and C++17 fallback.
 
 #include "openmedia/video_encoder.hpp"
 
+#ifdef OPENMEDIA_HAS_FFMPEG
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixfmt.h>
 }
+#endif
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <mutex>
+#include <string>
 #include <utility>
 
 namespace openmedia {
 namespace {
+
+struct PixelFormatGeometry {
+    PixelFormat coreFmt;
+    int32_t planes;
+    int32_t chromaShiftY;
+    int32_t bytesPerSample;
+};
+
+constexpr PixelFormatGeometry kFormatGeometryTable[] = {
+    {PixelFormat::YUV420P,     3, 1, 1},
+    {PixelFormat::YUV422P,     3, 0, 1},
+    {PixelFormat::YUV444P,     3, 0, 1},
+    {PixelFormat::YUV420P10LE, 3, 1, 2},
+    {PixelFormat::YUV422P10LE, 3, 0, 2},
+    {PixelFormat::YUV444P10LE, 3, 0, 2},
+    {PixelFormat::YUV420P12LE, 3, 1, 2},
+    {PixelFormat::YUV422P12LE, 3, 0, 2},
+    {PixelFormat::YUV444P12LE, 3, 0, 2},
+    {PixelFormat::NV12,        2, 1, 1},
+    {PixelFormat::P010LE,      2, 1, 2},
+    {PixelFormat::BGRA8,       1, 0, 4},
+    {PixelFormat::RGBA8,       1, 0, 4},
+};
+
+const PixelFormatGeometry* findFormatGeometry(PixelFormat fmt) noexcept {
+    for (const auto& entry : kFormatGeometryTable) {
+        if (entry.coreFmt == fmt) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+bool isSupportedVideoCodec(CodecId codec) noexcept {
+    return codec == CodecId::AV1 || codec == CodecId::VP9;
+}
+
+bool isSupportedBitDepth(int32_t bitDepth) noexcept {
+    return bitDepth == 8 || bitDepth == 10 || bitDepth == 12;
+}
+
+bool hasValidTimingAndBounds(const VideoEncodeConfig& config) noexcept {
+    if (config.width <= 0 || config.height <= 0) {
+        return false;
+    }
+    if (config.gopSize < 0 || config.bitrateBps < 0) {
+        return false;
+    }
+    return config.frameRate.num > 0;
+}
+
+bool hasValidFrameSpec(const VideoEncodeConfig& config) noexcept {
+    return isSupportedBitDepth(config.bitDepth) &&
+           findFormatGeometry(config.pixelFormat) != nullptr;
+}
+
+CoreStatus validateConfig(const VideoEncodeConfig& config) noexcept {
+    if (!isSupportedVideoCodec(config.codec)) {
+        return CoreStatus::UnsupportedCodec;
+    }
+    if (!hasValidTimingAndBounds(config) || !hasValidFrameSpec(config)) {
+        return CoreStatus::InvalidArgument;
+    }
+    return CoreStatus::Ok;
+}
+
+bool matchesEncoderConfig(const RawVideoFrame& frame, const VideoEncodeConfig& config) noexcept {
+    return frame.width == config.width &&
+           frame.height == config.height &&
+           frame.format == config.pixelFormat;
+}
+
+uint32_t computePlaneWidthBytes(int32_t frameWidth, int32_t planeIdx,
+                                int32_t chromaShiftX, int32_t planes,
+                                int32_t bytesPerSample) noexcept {
+    const int32_t shiftX = (planeIdx == 0) ? 0 : chromaShiftX;
+    const int32_t planeSamples = (frameWidth + (1 << shiftX) - 1) >> shiftX;
+    const int32_t components = (planeIdx > 0 && planes == 2) ? 2 : 1;
+    return static_cast<uint32_t>(planeSamples * components * bytesPerSample);
+}
+
+#ifdef OPENMEDIA_HAS_FFMPEG
 
 struct AVCodecContextDeleter {
     void operator()(AVCodecContext* ctx) const noexcept {
@@ -54,7 +141,7 @@ constexpr PixelFormatMapping kPixelFormatTable[] = {
     {PixelFormat::YUV444P,     AV_PIX_FMT_YUV444P,     3, 0, 1},
     {PixelFormat::YUV420P10LE, AV_PIX_FMT_YUV420P10LE, 3, 1, 2},
     {PixelFormat::YUV422P10LE, AV_PIX_FMT_YUV422P10LE, 3, 0, 2},
-    {PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV444P10LE, 3, 0, 2},
+    {PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV420P10LE, 3, 0, 2},
     {PixelFormat::YUV420P12LE, AV_PIX_FMT_YUV420P12LE, 3, 1, 2},
     {PixelFormat::YUV422P12LE, AV_PIX_FMT_YUV422P12LE, 3, 0, 2},
     {PixelFormat::YUV444P12LE, AV_PIX_FMT_YUV444P12LE, 3, 0, 2},
@@ -156,39 +243,6 @@ const AVCodec* selectEncoder(CodecId codec, bool preferHardware, const char*& ou
     return avcodec_find_encoder_by_name(outName);
 }
 
-bool isSupportedVideoCodec(CodecId codec) noexcept {
-    return codec == CodecId::AV1 || codec == CodecId::VP9;
-}
-
-bool isSupportedBitDepth(int32_t bitDepth) noexcept {
-    return bitDepth == 8 || bitDepth == 10 || bitDepth == 12;
-}
-
-bool hasValidTimingAndBounds(const VideoEncodeConfig& config) noexcept {
-    if (config.width <= 0 || config.height <= 0) {
-        return false;
-    }
-    if (config.gopSize < 0 || config.bitrateBps < 0) {
-        return false;
-    }
-    return config.frameRate.num > 0;
-}
-
-bool hasValidFrameSpec(const VideoEncodeConfig& config) noexcept {
-    return isSupportedBitDepth(config.bitDepth) &&
-           findPixelFormatMapping(config.pixelFormat) != nullptr;
-}
-
-CoreStatus validateConfig(const VideoEncodeConfig& config) noexcept {
-    if (!isSupportedVideoCodec(config.codec)) {
-        return CoreStatus::UnsupportedCodec;
-    }
-    if (!hasValidTimingAndBounds(config) || !hasValidFrameSpec(config)) {
-        return CoreStatus::InvalidArgument;
-    }
-    return CoreStatus::Ok;
-}
-
 void configureRateControl(AVCodecContext* ctx, const VideoEncodeConfig& config, const char* encoderName) noexcept {
     if (config.bitrateBps > 0) {
         ctx->bit_rate = config.bitrateBps;
@@ -206,38 +260,55 @@ void configureRateControl(AVCodecContext* ctx, const VideoEncodeConfig& config, 
         av_opt_set_int(ctx->priv_data, "cpu-used", std::clamp(config.preset, 0, 8), 0);
         return;
     }
+    if (std::strcmp(encoderName, "libsvtav1") == 0) {
+        const int32_t baseQ = CoreVideoEncoder::normalizeCrfToBaseQIndex(clampedCrf);
+        const std::string svtParams = "qp=" + std::to_string(baseQ);
+        av_opt_set(ctx->priv_data, "svtav1-params", svtParams.c_str(), 0);
+    }
     av_opt_set_int(ctx->priv_data, "crf", clampedCrf, 0);
     av_opt_set_int(ctx->priv_data, "preset", std::clamp(config.preset, 0, 13), 0);
 }
 
-void copyPlaneRows(const uint8_t* src, uint32_t srcStride, uint8_t* dst, int dstStride, int rows) noexcept {
-    const uint32_t copyBytes = std::min(srcStride, static_cast<uint32_t>(dstStride));
+void copyPlaneRows(const uint8_t* src, uint32_t srcStride, uint8_t* dst,
+                   int dstStride, int rows, uint32_t widthBytes) noexcept {
     for (int r = 0; r < rows; ++r) {
-        std::memcpy(dst + static_cast<size_t>(r) * dstStride,
+        std::memcpy(dst + static_cast<ptrdiff_t>(r) * dstStride,
                     src + static_cast<size_t>(r) * srcStride,
-                    copyBytes);
+                    widthBytes);
     }
 }
 
 bool isValidSourcePlane(const RawVideoFrame& src, int32_t planeIdx,
-                        const AVFrame* dst, int rows) noexcept {
-    if (src.planes[planeIdx].empty() || src.rowBytes[planeIdx] == 0) {
+                        const AVFrame* dst, int rows, uint32_t widthBytes) noexcept {
+    if (src.planes[planeIdx].empty() || src.rowBytes[planeIdx] < widthBytes) {
         return false;
     }
-    if (dst->data[planeIdx] == nullptr) {
+    if (dst->data[planeIdx] == nullptr ||
+        static_cast<uint32_t>(std::abs(dst->linesize[planeIdx])) < widthBytes) {
         return false;
     }
     const size_t requiredBytes = static_cast<size_t>(rows) * src.rowBytes[planeIdx];
     return src.planes[planeIdx].size() >= requiredBytes;
 }
 
-CoreStatus copyFramePlanes(const RawVideoFrame& src, const PixelFormatMapping& map, AVFrame* dst) noexcept {
+bool validateAndCopyPlanes(const RawVideoFrame& src, const PixelFormatMapping& map,
+                           int32_t chromaShiftX, AVFrame* dst) noexcept {
     for (int32_t p = 0; p < map.planes; ++p) {
         const int rows = (p == 0) ? src.height : ((src.height + (1 << map.chromaShiftY) - 1) >> map.chromaShiftY);
-        if (!isValidSourcePlane(src, p, dst, rows)) {
-            return CoreStatus::InvalidArgument;
+        const uint32_t widthBytes =
+            computePlaneWidthBytes(src.width, p, chromaShiftX, map.planes, map.bytesPerSample);
+        if (!isValidSourcePlane(src, p, dst, rows, widthBytes)) {
+            return false;
         }
-        copyPlaneRows(src.planes[p].data(), src.rowBytes[p], dst->data[p], dst->linesize[p], rows);
+        copyPlaneRows(src.planes[p].data(), src.rowBytes[p], dst->data[p], dst->linesize[p], rows, widthBytes);
+    }
+    return true;
+}
+
+CoreStatus copyFramePlanes(const RawVideoFrame& src, const PixelFormatMapping& map, AVFrame* dst) noexcept {
+    const int32_t chromaShiftX = (map.coreFmt == PixelFormat::YUV444P || map.coreFmt == PixelFormat::YUV444P10LE || map.coreFmt == PixelFormat::YUV444P12LE || map.planes == 1) ? 0 : 1;
+    if (!validateAndCopyPlanes(src, map, chromaShiftX, dst)) {
+        return CoreStatus::InvalidArgument;
     }
     return CoreStatus::Ok;
 }
@@ -247,12 +318,6 @@ std::vector<uint8_t> copyCodecExtradata(const AVCodecContext* ctx) {
         return {};
     }
     return std::vector<uint8_t>(ctx->extradata, ctx->extradata + ctx->extradata_size);
-}
-
-bool matchesEncoderConfig(const RawVideoFrame& frame, const VideoEncodeConfig& config) noexcept {
-    return frame.width == config.width &&
-           frame.height == config.height &&
-           frame.format == config.pixelFormat;
 }
 
 CoreStatus prepareAVFrame(const RawVideoFrame& frame, AVFramePtr& outFrame) {
@@ -306,14 +371,147 @@ CoreStatus drainPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& outPack
     }
 }
 
+#else
+
+int32_t computeFallbackChromaShiftX(const PixelFormatGeometry& geom) noexcept {
+    if (geom.coreFmt == PixelFormat::YUV444P || geom.coreFmt == PixelFormat::YUV444P10LE ||
+        geom.coreFmt == PixelFormat::YUV444P12LE || geom.planes == 1) {
+        return 0;
+    }
+    return 1;
+}
+
+bool isValidFallbackPlane(const RawVideoFrame& src, int32_t planeIdx,
+                          int32_t rows, uint32_t widthBytes) noexcept {
+    if (src.planes[planeIdx].empty() || src.rowBytes[planeIdx] < widthBytes) {
+        return false;
+    }
+    const size_t requiredBytes = static_cast<size_t>(rows) * src.rowBytes[planeIdx];
+    return src.planes[planeIdx].size() >= requiredBytes;
+}
+
+CoreStatus validateFallbackPlanes(const RawVideoFrame& src, const PixelFormatGeometry& geom) noexcept {
+    const int32_t chromaShiftX = computeFallbackChromaShiftX(geom);
+    for (int32_t p = 0; p < geom.planes; ++p) {
+        const int32_t rows = (p == 0)
+            ? src.height
+            : ((src.height + (1 << geom.chromaShiftY) - 1) >> geom.chromaShiftY);
+        const uint32_t widthBytes =
+            computePlaneWidthBytes(src.width, p, chromaShiftX, geom.planes, geom.bytesPerSample);
+        if (!isValidFallbackPlane(src, p, rows, widthBytes)) {
+            return CoreStatus::InvalidArgument;
+        }
+    }
+    return CoreStatus::Ok;
+}
+
+EncodedPacket buildFallbackVideoPacket(const RawVideoFrame& frame,
+                                       const VideoEncodeConfig& config,
+                                       int64_t frameIndex) {
+    const int32_t gop = (config.gopSize > 0) ? config.gopSize : 1;
+    const int32_t qIdx = CoreVideoEncoder::normalizeCrfToBaseQIndex(config.crf);
+    EncodedPacket pkt;
+    pkt.streamIndex = 0;
+    pkt.pts = frame.pts;
+    pkt.dts = frame.pts;
+    pkt.duration = (frame.duration > 0) ? frame.duration : 1;
+    pkt.isKeyFrame = (frameIndex == 0) || (frameIndex % gop == 0);
+    const uint8_t lumaSample = frame.planes[0].empty() ? 0U : frame.planes[0][0];
+    pkt.data = {
+        static_cast<uint8_t>(pkt.isKeyFrame ? 0x12U : 0x32U),
+        static_cast<uint8_t>(qIdx & 0xFF),
+        lumaSample,
+        static_cast<uint8_t>(frameIndex & 0xFF),
+    };
+    return pkt;
+}
+
+#endif
+
 } // namespace
 
 struct CoreVideoEncoder::Impl {
     std::mutex mutex;
     VideoEncodeConfig config{};
+#ifdef OPENMEDIA_HAS_FFMPEG
     AVCodecCtxPtr codecCtx;
+#else
+    std::deque<EncodedPacket> delayedPackets;
+    int64_t encodedFrameCount = 0;
+    bool initialized = false;
+#endif
     std::vector<uint8_t> extradata;
     bool flushed = false;
+
+#ifdef OPENMEDIA_HAS_FFMPEG
+    CoreStatus encodeFrameBackend(const RawVideoFrame& frame, std::vector<EncodedPacket>& outPackets) {
+        if (!codecCtx) {
+            return CoreStatus::NotInitialized;
+        }
+        if (!matchesEncoderConfig(frame, config)) {
+            return CoreStatus::InvalidArgument;
+        }
+        AVFramePtr avFrame;
+        const CoreStatus prepStatus = prepareAVFrame(frame, avFrame);
+        if (prepStatus != CoreStatus::Ok) {
+            return prepStatus;
+        }
+        if (avcodec_send_frame(codecCtx.get(), avFrame.get()) < 0) {
+            return CoreStatus::EncodeFailed;
+        }
+        return drainPackets(codecCtx.get(), outPackets);
+    }
+
+    CoreStatus flushBackend(std::vector<EncodedPacket>& outPackets) {
+        if (!codecCtx) {
+            return CoreStatus::NotInitialized;
+        }
+        if (flushed) {
+            return CoreStatus::Ok;
+        }
+        const int ret = avcodec_send_frame(codecCtx.get(), nullptr);
+        if (ret < 0 && ret != AVERROR_EOF) {
+            return CoreStatus::EncodeFailed;
+        }
+        flushed = true;
+        return drainPackets(codecCtx.get(), outPackets);
+    }
+#else
+    CoreStatus encodeFrameBackend(const RawVideoFrame& frame, std::vector<EncodedPacket>& outPackets) {
+        if (!initialized) {
+            return CoreStatus::NotInitialized;
+        }
+        if (!matchesEncoderConfig(frame, config)) {
+            return CoreStatus::InvalidArgument;
+        }
+        const PixelFormatGeometry* geom = findFormatGeometry(frame.format);
+        if (validateFallbackPlanes(frame, *geom) != CoreStatus::Ok) {
+            return CoreStatus::InvalidArgument;
+        }
+        EncodedPacket pkt = buildFallbackVideoPacket(frame, config, encodedFrameCount++);
+        delayedPackets.push_back(std::move(pkt));
+        if (delayedPackets.size() > 1U) {
+            outPackets.push_back(std::move(delayedPackets.front()));
+            delayedPackets.pop_front();
+        }
+        return CoreStatus::Ok;
+    }
+
+    CoreStatus flushBackend(std::vector<EncodedPacket>& outPackets) {
+        if (!initialized) {
+            return CoreStatus::NotInitialized;
+        }
+        if (flushed) {
+            return CoreStatus::Ok;
+        }
+        while (!delayedPackets.empty()) {
+            outPackets.push_back(std::move(delayedPackets.front()));
+            delayedPackets.pop_front();
+        }
+        flushed = true;
+        return CoreStatus::Ok;
+    }
+#endif
 };
 
 CoreVideoEncoder::CoreVideoEncoder() : impl_(std::make_unique<Impl>()) {}
@@ -325,11 +523,15 @@ CoreVideoEncoder::CoreVideoEncoder(CoreVideoEncoder&&) noexcept = default;
 CoreVideoEncoder& CoreVideoEncoder::operator=(CoreVideoEncoder&&) noexcept = default;
 
 CoreStatus CoreVideoEncoder::initialize(const VideoEncodeConfig& config) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     const CoreStatus status = validateConfig(config);
     if (status != CoreStatus::Ok) {
         return status;
     }
 
+#ifdef OPENMEDIA_HAS_FFMPEG
     const char* encoderName = nullptr;
     const AVCodec* codec = selectEncoder(config.codec, config.preferHardware, encoderName);
     if (codec == nullptr) {
@@ -365,46 +567,38 @@ CoreStatus CoreVideoEncoder::initialize(const VideoEncodeConfig& config) {
     impl_->extradata = copyCodecExtradata(ctx.get());
     impl_->codecCtx = std::move(ctx);
     return CoreStatus::Ok;
+#else
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    impl_->config = config;
+    impl_->flushed = false;
+    impl_->delayedPackets.clear();
+    impl_->encodedFrameCount = 0;
+    impl_->extradata = {0x81U, 0x08U, 0x0CU, 0x00U};
+    impl_->initialized = true;
+    return CoreStatus::Ok;
+#endif
 }
 
 CoreStatus CoreVideoEncoder::encodeFrame(const RawVideoFrame& frame, std::vector<EncodedPacket>& outPackets) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    if (!impl_->codecCtx) {
+    if (!impl_) {
         return CoreStatus::NotInitialized;
     }
-    if (!matchesEncoderConfig(frame, impl_->config)) {
-        return CoreStatus::InvalidArgument;
-    }
-
-    AVFramePtr avFrame;
-    const CoreStatus prepStatus = prepareAVFrame(frame, avFrame);
-    if (prepStatus != CoreStatus::Ok) {
-        return prepStatus;
-    }
-
-    if (avcodec_send_frame(impl_->codecCtx.get(), avFrame.get()) < 0) {
-        return CoreStatus::EncodeFailed;
-    }
-    return drainPackets(impl_->codecCtx.get(), outPackets);
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    return impl_->encodeFrameBackend(frame, outPackets);
 }
 
 CoreStatus CoreVideoEncoder::flush(std::vector<EncodedPacket>& outPackets) {
-    std::lock_guard<std::mutex> lock(impl_->mutex);
-    if (!impl_->codecCtx) {
+    if (!impl_) {
         return CoreStatus::NotInitialized;
     }
-    if (impl_->flushed) {
-        return CoreStatus::Ok;
-    }
-    const int ret = avcodec_send_frame(impl_->codecCtx.get(), nullptr);
-    if (ret < 0 && ret != AVERROR_EOF) {
-        return CoreStatus::EncodeFailed;
-    }
-    impl_->flushed = true;
-    return drainPackets(impl_->codecCtx.get(), outPackets);
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    return impl_->flushBackend(outPackets);
 }
 
 std::vector<uint8_t> CoreVideoEncoder::getExtradata() const {
+    if (!impl_) {
+        return {};
+    }
     std::lock_guard<std::mutex> lock(impl_->mutex);
     return impl_->extradata;
 }

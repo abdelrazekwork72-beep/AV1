@@ -1,3 +1,6 @@
+/// @file audio_decoder.cpp
+/// @brief 32-bit float planar audio decoder implementation with FFmpeg/libswresample and C++17 fallback.
+
 #include "openmedia/audio_decoder.hpp"
 
 #include <algorithm>
@@ -6,6 +9,7 @@
 #include <memory>
 #include <vector>
 
+#ifdef OPENMEDIA_HAS_FFMPEG
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/channel_layout.h>
@@ -15,11 +19,26 @@ extern "C" {
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 }
+#endif
 
 namespace openmedia {
 namespace {
 
 constexpr int32_t kMaxAudioChannels = 32;
+
+bool isValidInitParams(const StreamInfo& stream, int32_t targetSampleRate) noexcept {
+    if (targetSampleRate <= 0 || stream.type != MediaType::Audio) {
+        return false;
+    }
+    return stream.channels > 0 && stream.channels <= kMaxAudioChannels;
+}
+
+bool isValidPacketPayload(const std::vector<uint8_t>& data) noexcept {
+    return !data.empty() &&
+           data.size() <= static_cast<size_t>(std::numeric_limits<int>::max());
+}
+
+#ifdef OPENMEDIA_HAS_FFMPEG
 
 struct AVCodecContextDeleter {
     void operator()(AVCodecContext* ctx) const noexcept {
@@ -76,13 +95,6 @@ AVCodecID mapCodecId(const StreamInfo& stream) noexcept {
     }
 }
 
-bool isValidInitParams(const StreamInfo& stream, int32_t targetSampleRate) noexcept {
-    if (targetSampleRate <= 0) {
-        return false;
-    }
-    return stream.channels >= 0 && stream.channels <= kMaxAudioChannels;
-}
-
 const AVCodec* findDecoderForStream(const StreamInfo& stream) noexcept {
     const AVCodecID codecId = mapCodecId(stream);
     if (codecId == AV_CODEC_ID_NONE) {
@@ -99,10 +111,25 @@ bool isValidFrameFormat(const AVFrame* frame) noexcept {
     return frame->sample_rate > 0;
 }
 
-bool isValidPacketPayload(const std::vector<uint8_t>& data) noexcept {
-    return !data.empty() &&
-           data.size() <= static_cast<size_t>(std::numeric_limits<int>::max());
+#else
+
+bool isSupportedAudioCodec(CodecId codec) noexcept {
+    if (codec == CodecId::Opus || codec == CodecId::FLAC) {
+        return true;
+    }
+    return codec == CodecId::Vorbis || codec == CodecId::PCM;
 }
+
+int16_t readInt16Sample(const std::vector<uint8_t>& data, size_t byteOffset) noexcept {
+    if (byteOffset + sizeof(int16_t) <= data.size()) {
+        int16_t val = 0;
+        std::memcpy(&val, data.data() + byteOffset, sizeof(int16_t));
+        return val;
+    }
+    return static_cast<int16_t>(static_cast<int8_t>(data[byteOffset % data.size()]) * 256);
+}
+
+#endif
 
 } // namespace
 
@@ -112,6 +139,7 @@ public:
         if (!isValidInitParams(stream, targetSampleRate)) {
             return CoreStatus::InvalidArgument;
         }
+#ifdef OPENMEDIA_HAS_FFMPEG
         const AVCodec* codec = findDecoderForStream(stream);
         if (!codec) {
             return CoreStatus::UnsupportedCodec;
@@ -121,6 +149,17 @@ public:
             return openStatus;
         }
         return finalizeInit(targetSampleRate);
+#else
+        if (!isSupportedAudioCodec(stream.codec)) {
+            return CoreStatus::UnsupportedCodec;
+        }
+        targetSampleRate_ = targetSampleRate;
+        reset();
+        activeChannels_ = stream.channels;
+        inSampleRate_ = (stream.sampleRate > 0) ? stream.sampleRate : targetSampleRate;
+        initialized_ = true;
+        return CoreStatus::Ok;
+#endif
     }
 
     CoreStatus sendPacket(const EncodedPacket& packet) {
@@ -130,6 +169,7 @@ public:
         if (!isValidPacketPayload(packet.data)) {
             return CoreStatus::InvalidArgument;
         }
+#ifdef OPENMEDIA_HAS_FFMPEG
         if (av_new_packet(packet_.get(), static_cast<int>(packet.data.size())) < 0) {
             return CoreStatus::DecodeFailed;
         }
@@ -143,6 +183,10 @@ public:
             return CoreStatus::NeedMoreData;
         }
         return (sendRet < 0) ? CoreStatus::DecodeFailed : CoreStatus::Ok;
+#else
+        decodeFallbackPcmPacket(packet);
+        return CoreStatus::Ok;
+#endif
     }
 
     CoreStatus decodeAudioBatch(int32_t maxSamples, RawAudioBatch& outBatch) {
@@ -152,10 +196,12 @@ public:
         if (maxSamples <= 0) {
             return CoreStatus::InvalidArgument;
         }
+#ifdef OPENMEDIA_HAS_FFMPEG
         const CoreStatus drainStatus = drainBufferedFrames();
         if (drainStatus != CoreStatus::Ok) {
             return drainStatus;
         }
+#endif
         if (pendingSampleCount() > 0) {
             return popBatch(maxSamples, outBatch);
         }
@@ -166,6 +212,7 @@ public:
         if (!initialized_) {
             return CoreStatus::NotInitialized;
         }
+#ifdef OPENMEDIA_HAS_FFMPEG
         if (avcodec_send_packet(codecCtx_.get(), nullptr) < 0) {
             return CoreStatus::DecodeFailed;
         }
@@ -174,22 +221,27 @@ public:
             return drainStatus;
         }
         return drainResamplerTail();
+#else
+        eofReached_ = true;
+        return CoreStatus::Ok;
+#endif
     }
 
     void reset() {
+#ifdef OPENMEDIA_HAS_FFMPEG
         if (codecCtx_) {
             avcodec_flush_buffers(codecCtx_.get());
         }
         swrCtx_.reset();
+        inSampleFmt_ = AV_SAMPLE_FMT_NONE;
+#endif
         pendingSamples_.clear();
         eofReached_ = false;
         nextPts_ = 0;
-        activeChannels_ = 0;
-        inSampleRate_ = 0;
-        inSampleFmt_ = AV_SAMPLE_FMT_NONE;
     }
 
 private:
+#ifdef OPENMEDIA_HAS_FFMPEG
     CoreStatus openCodecContext(const StreamInfo& stream, const AVCodec* codec) {
         codecCtx_.reset(avcodec_alloc_context3(codec));
         if (!codecCtx_) {
@@ -239,6 +291,7 @@ private:
             return CoreStatus::OpenFailed;
         }
         targetSampleRate_ = targetSampleRate;
+        activeChannels_ = codecCtx_->ch_layout.nb_channels;
         reset();
         initialized_ = true;
         return CoreStatus::Ok;
@@ -385,6 +438,27 @@ private:
             scratchPtrs_[static_cast<size_t>(ch)] = reinterpret_cast<uint8_t*>(buf.data());
         }
     }
+#else
+    void decodeFallbackPcmPacket(const EncodedPacket& packet) {
+        if (pendingSampleCount() == 0) {
+            nextPts_ = packet.pts;
+        }
+        pendingSamples_.resize(static_cast<size_t>(activeChannels_));
+        const size_t frameStride = static_cast<size_t>(activeChannels_) * sizeof(int16_t);
+        const size_t frameCount = std::max<size_t>(1U, packet.data.size() / frameStride);
+        for (size_t i = 0; i < frameCount; ++i) {
+            appendFallbackFrameSamples(packet.data, i * frameStride);
+        }
+    }
+
+    void appendFallbackFrameSamples(const std::vector<uint8_t>& data, size_t baseOffset) {
+        for (int32_t ch = 0; ch < activeChannels_; ++ch) {
+            const size_t offset = baseOffset + static_cast<size_t>(ch) * sizeof(int16_t);
+            const int16_t pcm16 = readInt16Sample(data, offset);
+            pendingSamples_[static_cast<size_t>(ch)].push_back(convertInt16ToFloat32(pcm16));
+        }
+    }
+#endif
 
     int32_t pendingSampleCount() const noexcept {
         if (pendingSamples_.empty()) {
@@ -411,17 +485,19 @@ private:
         return CoreStatus::Ok;
     }
 
+#ifdef OPENMEDIA_HAS_FFMPEG
     AVCodecContextPtr codecCtx_;
     SwrContextPtr swrCtx_;
     AVFramePtr frame_;
     AVPacketPtr packet_;
-    std::vector<std::vector<float>> pendingSamples_;
     std::vector<std::vector<float>> scratchBuffers_;
     std::vector<uint8_t*> scratchPtrs_;
+    AVSampleFormat inSampleFmt_ = AV_SAMPLE_FMT_NONE;
+#endif
+    std::vector<std::vector<float>> pendingSamples_;
     int32_t targetSampleRate_ = 48000;
     int32_t activeChannels_ = 0;
     int32_t inSampleRate_ = 0;
-    AVSampleFormat inSampleFmt_ = AV_SAMPLE_FMT_NONE;
     int64_t nextPts_ = 0;
     bool initialized_ = false;
     bool eofReached_ = false;

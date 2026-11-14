@@ -1,7 +1,9 @@
 /// @file test_muxer_pipeline.cpp
-/// @brief Standalone unit test TC-1.2.5 for CoreMuxer and CoreAudioEncoder.
+/// @brief Standalone unit test TC-1.2.5 for CoreMuxer and CoreAudioEncoder with CoreDemuxer round-trip.
 
+#include "openmedia/demuxer.hpp"
 #include "openmedia/muxer.hpp"
+
 #include <cassert>
 #include <cstdio>
 #include <iostream>
@@ -11,6 +13,15 @@
 namespace {
 
 using namespace openmedia;
+
+void verifyRoundTripDemuxer(const std::string& containerPath) {
+    CoreDemuxer demuxer;
+    assert(demuxer.openFile(containerPath) == CoreStatus::Ok);
+    assert(demuxer.isOpen());
+    assert(!demuxer.getStreams().empty());
+    demuxer.close();
+    assert(!demuxer.isOpen());
+}
 
 void testMuxerContainerAndStreamRegistration() {
     CoreMuxer muxer;
@@ -76,8 +87,9 @@ void testMuxerContainerAndStreamRegistration() {
     assert(muxer.writeInterleavedPacket(pkt1) == CoreStatus::Ok);
 
     assert(muxer.writeTrailerAndClose() == CoreStatus::Ok);
+    verifyRoundTripDemuxer(outPath);
     std::remove(outPath.c_str());
-    std::cout << "[PASS] CoreMuxer container registration & interleaved ordering guards\n";
+    std::cout << "[PASS] CoreMuxer container registration, interleaved ordering & round-trip demux\n";
 }
 
 void testAudioEncoderConfigValidation() {
