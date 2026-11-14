@@ -1,0 +1,6 @@
+{
+  "field": "software",
+  "requested_field": "software",
+  "divisions_csv": "engineering,security,testing",
+  "registry_version": "1.1.0"
+}

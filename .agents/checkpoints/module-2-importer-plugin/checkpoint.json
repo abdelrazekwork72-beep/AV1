@@ -1,0 +1,28 @@
+{
+  "moduleId": "module-2-importer-plugin",
+  "title": "Module 2: Importer Plugin (OpenMedia_Importer.prm)",
+  "githubProjectNumber": null,
+  "updatedAt": "2026-11-14T06:03:36Z",
+  "items": {
+    "US-2.1.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:35Z",
+      "branch": "feat/us-2.1.0-importer-registration-stream-discovery"
+    },
+    "US-2.2.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:35Z",
+      "branch": "feat/us-2.2.0-video-decoding-pixel-alignment"
+    },
+    "US-2.3.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:36Z",
+      "branch": "feat/us-2.3.0-async-caching-memory-governor"
+    },
+    "US-2.4.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:36Z",
+      "branch": "feat/us-2.4.0-zero-conform-audio-pipeline"
+    }
+  }
+}

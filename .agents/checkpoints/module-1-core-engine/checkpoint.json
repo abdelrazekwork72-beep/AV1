@@ -1,0 +1,18 @@
+{
+  "moduleId": "module-1-core-engine",
+  "title": "Module 1: OpenMediaCore Shared Engine",
+  "githubProjectNumber": null,
+  "updatedAt": "2026-11-14T06:03:34Z",
+  "items": {
+    "US-1.1.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:33Z",
+      "branch": "feat/us-1.1.0-build-system-vcpkg"
+    },
+    "US-1.2.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:34Z",
+      "branch": "feat/us-1.2.0-core-media-library"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "moduleId": "module-4-integration-qa",
+  "title": "Module 4: Integration, Packaging & QA",
+  "githubProjectNumber": null,
+  "updatedAt": "2026-11-14T06:03:38Z",
+  "items": {
+    "US-4.1.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:38Z",
+      "branch": "feat/us-4.1.0-mediacore-host-integration-harness"
+    },
+    "US-4.2.0": {
+      "status": "Todo",
+      "updatedAt": "2026-11-14T06:03:38Z",
+      "branch": "feat/us-4.2.0-cpack-distribution-packaging"
+    }
+  }
+}
