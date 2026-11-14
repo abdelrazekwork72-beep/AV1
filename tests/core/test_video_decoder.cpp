@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -109,7 +110,7 @@ void testInitializationValidation() {
           "TC-1.2.2 Init", "VP9 stream initializes CoreVideoDecoder");
 }
 
-/// @brief Verifies error handling for uninitialized calls, empty packets, and corrupt payloads.
+/// @brief Verifies error handling for moved-from, uninitialized, empty, and corrupt inputs.
 void testErrorHandling() {
     openmedia::CoreVideoDecoder uninitDecoder;
     openmedia::EncodedPacket pkt;
@@ -123,6 +124,20 @@ void testErrorHandling() {
           "TC-1.2.2 Error", "decodeNextFrame before initialize returns NotInitialized");
     check(uninitDecoder.flush() == openmedia::CoreStatus::NotInitialized,
           "TC-1.2.2 Error", "flush before initialize returns NotInitialized");
+
+    openmedia::CoreVideoDecoder movedTo(std::move(uninitDecoder));
+    openmedia::StreamInfo dummyStream;
+    dummyStream.type = openmedia::MediaType::Video;
+    dummyStream.codec = openmedia::CodecId::VP9;
+    uninitDecoder.reset();
+    check(uninitDecoder.initialize(dummyStream) == openmedia::CoreStatus::NotInitialized,
+          "TC-1.2.2 Error", "initialize on moved-from instance returns NotInitialized");
+    check(uninitDecoder.sendPacket(pkt) == openmedia::CoreStatus::NotInitialized,
+          "TC-1.2.2 Error", "sendPacket on moved-from instance returns NotInitialized");
+    check(uninitDecoder.decodeNextFrame(frame) == openmedia::CoreStatus::NotInitialized,
+          "TC-1.2.2 Error", "decodeNextFrame on moved-from instance returns NotInitialized");
+    check(uninitDecoder.flush() == openmedia::CoreStatus::NotInitialized,
+          "TC-1.2.2 Error", "flush on moved-from instance returns NotInitialized");
 
     openmedia::CoreVideoDecoder decoder;
     openmedia::StreamInfo vp9Stream;

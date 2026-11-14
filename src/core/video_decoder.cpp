@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -194,6 +195,10 @@ CoreStatus copyExtradata(AVCodecContext& ctx, const std::vector<uint8_t>& extrad
     if (extradata.empty()) {
         return CoreStatus::Ok;
     }
+    constexpr size_t kMaxIntSize = static_cast<size_t>(std::numeric_limits<int>::max());
+    if (extradata.size() > kMaxIntSize - AV_INPUT_BUFFER_PADDING_SIZE) {
+        return CoreStatus::InvalidArgument;
+    }
     const size_t allocSize = extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE;
     uint8_t* buf = static_cast<uint8_t*>(av_mallocz(allocSize));
     if (buf == nullptr) {
@@ -202,6 +207,39 @@ CoreStatus copyExtradata(AVCodecContext& ctx, const std::vector<uint8_t>& extrad
     std::memcpy(buf, extradata.data(), extradata.size());
     ctx.extradata = buf;
     ctx.extradata_size = static_cast<int>(extradata.size());
+    return CoreStatus::Ok;
+}
+
+/// @brief Allocates and opens an AVCodecContext for the requested StreamInfo.
+CoreStatus openCodecContext(const StreamInfo& stream, AVCodecContextPtr& outCtx) noexcept {
+    const CodecMapEntry* codecEntry = findCodecEntry(stream.codec);
+    if (codecEntry == nullptr) {
+        return CoreStatus::UnsupportedCodec;
+    }
+
+    const AVCodec* codec = findFFmpegDecoder(*codecEntry);
+    if (codec == nullptr) {
+        return CoreStatus::UnsupportedCodec;
+    }
+
+    AVCodecContextPtr ctx(avcodec_alloc_context3(codec));
+    if (!ctx) {
+        return CoreStatus::OpenFailed;
+    }
+
+    ctx->width = stream.width;
+    ctx->height = stream.height;
+    ctx->thread_count = 0;
+
+    if (copyExtradata(*ctx, stream.extradata) != CoreStatus::Ok) {
+        return CoreStatus::OpenFailed;
+    }
+
+    if (avcodec_open2(ctx.get(), codec, nullptr) < 0) {
+        return CoreStatus::OpenFailed;
+    }
+
+    outCtx = std::move(ctx);
     return CoreStatus::Ok;
 }
 
@@ -232,8 +270,12 @@ void copySinglePlane(const uint8_t* srcData,
                      uint32_t dstStride,
                      uint32_t copyWidthBytes,
                      int32_t planeHeight) {
+    if (planeHeight <= 0) {
+        dstBuffer.clear();
+        return;
+    }
     dstBuffer.assign(static_cast<size_t>(dstStride) * static_cast<size_t>(planeHeight), 0U);
-    if (srcData == nullptr || planeHeight <= 0) {
+    if (srcData == nullptr) {
         return;
     }
     const uint32_t srcAbsStride = static_cast<uint32_t>(std::abs(srcLinesize));
@@ -302,6 +344,15 @@ struct CoreVideoDecoder::Impl {
     bool initialized = false;
 };
 
+namespace {
+
+/// @brief Returns true if impl is non-null, initialized, and owns a valid AVCodecContext.
+bool isDecoderReady(const CoreVideoDecoder::Impl* impl) noexcept {
+    return impl != nullptr && impl->initialized && impl->codecCtx != nullptr;
+}
+
+} // namespace
+
 CoreVideoDecoder::CoreVideoDecoder()
     : impl_(std::make_unique<Impl>()) {}
 
@@ -312,35 +363,17 @@ CoreVideoDecoder::CoreVideoDecoder(CoreVideoDecoder&& other) noexcept = default;
 CoreVideoDecoder& CoreVideoDecoder::operator=(CoreVideoDecoder&& other) noexcept = default;
 
 CoreStatus CoreVideoDecoder::initialize(const StreamInfo& stream) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (stream.type != MediaType::Video) {
         return CoreStatus::InvalidArgument;
     }
 
-    const CodecMapEntry* codecEntry = findCodecEntry(stream.codec);
-    if (codecEntry == nullptr) {
-        return CoreStatus::UnsupportedCodec;
-    }
-
-    const AVCodec* codec = findFFmpegDecoder(*codecEntry);
-    if (codec == nullptr) {
-        return CoreStatus::UnsupportedCodec;
-    }
-
-    AVCodecContextPtr ctx(avcodec_alloc_context3(codec));
-    if (!ctx) {
-        return CoreStatus::OpenFailed;
-    }
-
-    ctx->width = stream.width;
-    ctx->height = stream.height;
-    ctx->thread_count = 0;
-
-    if (copyExtradata(*ctx, stream.extradata) != CoreStatus::Ok) {
-        return CoreStatus::OpenFailed;
-    }
-
-    if (avcodec_open2(ctx.get(), codec, nullptr) < 0) {
-        return CoreStatus::OpenFailed;
+    AVCodecContextPtr ctx;
+    const CoreStatus openStatus = openCodecContext(stream, ctx);
+    if (openStatus != CoreStatus::Ok) {
+        return openStatus;
     }
 
     AVFramePtr frame(av_frame_alloc());
@@ -357,10 +390,14 @@ CoreStatus CoreVideoDecoder::initialize(const StreamInfo& stream) {
 }
 
 CoreStatus CoreVideoDecoder::sendPacket(const EncodedPacket& packet) {
-    if (!impl_->initialized || !impl_->codecCtx) {
+    if (!isDecoderReady(impl_.get())) {
         return CoreStatus::NotInitialized;
     }
     if (packet.data.empty()) {
+        return CoreStatus::InvalidArgument;
+    }
+    constexpr size_t kMaxIntSize = static_cast<size_t>(std::numeric_limits<int>::max());
+    if (packet.data.size() > kMaxIntSize) {
         return CoreStatus::InvalidArgument;
     }
 
@@ -381,7 +418,7 @@ CoreStatus CoreVideoDecoder::sendPacket(const EncodedPacket& packet) {
 }
 
 CoreStatus CoreVideoDecoder::decodeNextFrame(RawVideoFrame& outFrame) {
-    if (!impl_->initialized || !impl_->codecCtx) {
+    if (!isDecoderReady(impl_.get())) {
         return CoreStatus::NotInitialized;
     }
 
@@ -403,7 +440,7 @@ CoreStatus CoreVideoDecoder::decodeNextFrame(RawVideoFrame& outFrame) {
 }
 
 CoreStatus CoreVideoDecoder::flush() {
-    if (!impl_->initialized || !impl_->codecCtx) {
+    if (!isDecoderReady(impl_.get())) {
         return CoreStatus::NotInitialized;
     }
     const int ret = avcodec_send_packet(impl_->codecCtx.get(), nullptr);
@@ -414,7 +451,7 @@ CoreStatus CoreVideoDecoder::flush() {
 }
 
 void CoreVideoDecoder::reset() {
-    if (impl_->initialized && impl_->codecCtx) {
+    if (isDecoderReady(impl_.get())) {
         avcodec_flush_buffers(impl_->codecCtx.get());
     }
 }
