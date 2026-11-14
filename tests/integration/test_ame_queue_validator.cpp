@@ -37,6 +37,7 @@ int main() {
     assert(!fs::exists(tempDir / "batch.xml"));
     assert(fs::exists(tempDir / "UserCustomPreset.epr"));
     assert(report.passed());
+    assert(openmedia::integration::AmeQueueValidator::verifyContainerIntegrity(".mp4", {0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p'}));
 
     fs::remove_all(tempDir);
     std::cout << "[PASS] TC-4.1.3 AmeQueueValidator purged 2 stale caches and passed 5-job batch.\n";

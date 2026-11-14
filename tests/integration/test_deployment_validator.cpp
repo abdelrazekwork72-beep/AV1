@@ -1,37 +1,12 @@
 /// @file test_deployment_validator.cpp
-/// @brief Standalone C++17 integration test for TC-4.1.1 (DeploymentValidator).
+/// @brief Standalone C++17 integration test for TC-4.1.1 (DeploymentValidator) with real xImportEntry & xSDKExport.
 
 #include "deployment_validator.hpp"
+#include "importer/importer_entry.hpp"
+#include "exporter/exporter_entry.hpp"
 
 #include <cassert>
 #include <iostream>
-
-namespace {
-
-csSDK_int32 mockImportEntry(csSDK_int32 selector,
-                            imStdParms* /*stdParms*/,
-                            void* param1,
-                            void* /*param2*/) {
-    if (selector == 0 && param1 != nullptr) {
-        auto* flags = static_cast<csSDK_int32*>(param1);
-        flags[0] = 100; // priority = 100
-        flags[1] = 1;   // avoidAudioConform = kPrTrue
-    }
-    return 0;
-}
-
-csSDK_int32 mockExportEntry(csSDK_int32 selector,
-                            exportStdParms* /*stdParms*/,
-                            void* param1,
-                            void* /*param2*/) {
-    if (selector == 0 && param1 != nullptr) {
-        const int idx = *static_cast<const int*>(param1);
-        return (idx < 3) ? 0 : 1; // 3 containers (MKV, WebM, MP4) then Done
-    }
-    return 0;
-}
-
-} // namespace
 
 int main() {
     openmedia::integration::DeploymentValidator validator;
@@ -44,14 +19,14 @@ int main() {
     assert(!missingRes.importerLoaded);
     assert(!missingRes.exporterLoaded);
 
-    // 2. Direct entry-point handshake verification (TC-4.1.1)
+    // 2. Direct entry-point handshake verification against real xImportEntry & xSDKExport (TC-4.1.1)
     const auto directRes = validator.validateDirectEntryPoints(
-        &mockImportEntry, &mockExportEntry);
+        &xImportEntry, &xSDKExport);
     assert(directRes.passed());
     assert(directRes.importerPriority == 100);
     assert(directRes.avoidAudioConform);
     assert(directRes.exporterContainerCount == 3);
 
-    std::cout << "[PASS] TC-4.1.1 DeploymentValidator handshake & loader tests passed.\n";
+    std::cout << "[PASS] TC-4.1.1 DeploymentValidator verified real xImportEntry & xSDKExport handshakes.\n";
     return 0;
 }

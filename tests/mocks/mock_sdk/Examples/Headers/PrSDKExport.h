@@ -33,3 +33,8 @@ struct exDoExportRec {
     prBool exportVideo = 1;
     prBool exportAudio = 1;
 };
+
+struct exportStdParms {
+    csSDK_int32 exportParamVersion = 1;
+    void* spBasic = nullptr;
+};

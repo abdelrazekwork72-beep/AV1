@@ -21,7 +21,12 @@ public:
     explicit ScopedLibrary(const std::string& path) noexcept {
 #if defined(_WIN32)
         if (!path.empty()) {
-            handle_ = LoadLibraryExA(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+            const int wlen = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+            if (wlen > 0) {
+                std::wstring wpath(static_cast<std::size_t>(wlen), L'\0');
+                MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wpath.data(), wlen);
+                handle_ = LoadLibraryExW(wpath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+            }
         }
 #else
         if (!path.empty()) {
@@ -61,18 +66,6 @@ public:
 private:
     void* handle_{nullptr};
 };
-
-constexpr csSDK_int32 kSelImInit = 0;
-constexpr csSDK_int32 kSelImGetIndFormat = 1;
-constexpr csSDK_int32 kSelImOpenFile8 = 2;
-constexpr csSDK_int32 kSelImGetInfo8 = 3;
-constexpr csSDK_int32 kSelImGetSourceVideo = 4;
-constexpr csSDK_int32 kSelImImportAudio7 = 5;
-
-constexpr csSDK_int32 kSelExStartup = 0;
-constexpr csSDK_int32 kSelExBeginInstance = 1;
-constexpr csSDK_int32 kSelExQueryStillSequence = 10;
-constexpr csSDK_int32 kSelExEndInstance = 2;
 
 } // namespace
 
@@ -123,21 +116,26 @@ bool DeploymentValidator::verifyImporterHandshake(
     if (!importFn) {
         return false;
     }
-    std::array<csSDK_int32, 2> initFlags{0, 0};
-    if (importFn(kSelImInit, &host.importerStdParms, initFlags.data(), nullptr) != 0) {
+    openmedia::importer::ImImportInfoRecExt initRec{};
+    if (importFn(openmedia::importer::kSelInit, &host.importerStdParms, &initRec, nullptr) != openmedia::importer::kImNoErr) {
         return false;
     }
-    outPriority = initFlags[0];
-    outAvoidConform = (initFlags[1] != 0);
+    outPriority = initRec.priority;
+    outAvoidConform = (initRec.avoidAudioConform != 0);
 
-    const std::array<csSDK_int32, 5> followUpSelectors{
-        kSelImGetIndFormat, kSelImOpenFile8, kSelImGetInfo8,
-        kSelImGetSourceVideo, kSelImImportAudio7
-    };
-    for (csSDK_int32 sel : followUpSelectors) {
-        if (importFn(sel, &host.importerStdParms, nullptr, nullptr) != 0) {
+    for (std::intptr_t idx = 0; idx < 7; ++idx) {
+        openmedia::importer::ImIndFormatRecExt fmtRec{};
+        const csSDK_int32 rc = importFn(
+            openmedia::importer::kSelGetIndFormat,
+            &host.importerStdParms,
+            reinterpret_cast<void*>(idx),
+            &fmtRec);
+        if (rc != openmedia::importer::kImNoErr) {
             return false;
         }
+    }
+    if (importFn(openmedia::importer::kSelQuietFile, &host.importerStdParms, nullptr, nullptr) != openmedia::importer::kImNoErr) {
+        return false;
     }
     return outPriority == 100 && outAvoidConform;
 }
@@ -150,21 +148,30 @@ bool DeploymentValidator::verifyExporterHandshake(
         return false;
     }
     outContainerCount = 0;
-    for (int idx = 0; idx < 4; ++idx) {
-        const csSDK_int32 rc = exportFn(kSelExStartup, &host.exporterStdParms, &idx, nullptr);
-        if (rc == 0) {
+    for (csSDK_int32 idx = 0; idx < 4; ++idx) {
+        openmedia::exporter::ExStartupInfoRecExt startupRec{};
+        startupRec.exporterIndex = idx;
+        const csSDK_int32 rc = exportFn(exSelStartup, &host.exporterStdParms, &startupRec, nullptr);
+        if (rc == openmedia::exporter::kExIterateExporter) {
             ++outContainerCount;
             continue;
         }
+        if (rc == openmedia::exporter::kExIterateExporterDone) {
+            if (!startupRec.fileExtension.empty()) {
+                ++outContainerCount;
+            }
+            break;
+        }
         break;
     }
-    if (exportFn(kSelExBeginInstance, &host.exporterStdParms, nullptr, nullptr) != 0) {
+    if (exportFn(exSelBeginInstance, &host.exporterStdParms, nullptr, nullptr) != openmedia::exporter::kExNoErr) {
         return false;
     }
-    if (exportFn(kSelExQueryStillSequence, &host.exporterStdParms, nullptr, nullptr) != 0) {
+    prBool isStill = 1;
+    if (exportFn(10, &host.exporterStdParms, &isStill, nullptr) != openmedia::exporter::kExNoErr) {
         return false;
     }
-    return exportFn(kSelExEndInstance, &host.exporterStdParms, nullptr, nullptr) == 0;
+    return exportFn(exSelEndInstance, &host.exporterStdParms, nullptr, nullptr) == openmedia::exporter::kExNoErr;
 }
 
 } // namespace openmedia::integration

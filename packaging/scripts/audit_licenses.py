@@ -13,7 +13,7 @@ MOCK_SDK_PREFIX = ("tests", "mocks", "mock_sdk")
 ADOBE_BANNER_MARKERS = (
     "ADOBE CONFIDENTIAL",
     "Copyright Adobe Systems Incorporated",
-    "Adobe Premiere Pro SDK",
+    "property of Adobe Systems Incorporated",
 )
 
 

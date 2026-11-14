@@ -26,7 +26,7 @@
 #endif
 
 #ifndef PREMPLUGENTRY
-#define PREMPLUGENTRY
+#define PREMPLUGENTRY csSDK_int32
 #endif
 
 namespace openmedia::importer {
