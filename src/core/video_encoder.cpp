@@ -156,20 +156,34 @@ const AVCodec* selectEncoder(CodecId codec, bool preferHardware, const char*& ou
     return avcodec_find_encoder_by_name(outName);
 }
 
+bool isSupportedVideoCodec(CodecId codec) noexcept {
+    return codec == CodecId::AV1 || codec == CodecId::VP9;
+}
+
+bool isSupportedBitDepth(int32_t bitDepth) noexcept {
+    return bitDepth == 8 || bitDepth == 10 || bitDepth == 12;
+}
+
+bool hasValidTimingAndBounds(const VideoEncodeConfig& config) noexcept {
+    if (config.width <= 0 || config.height <= 0) {
+        return false;
+    }
+    if (config.gopSize < 0 || config.bitrateBps < 0) {
+        return false;
+    }
+    return config.frameRate.num > 0;
+}
+
+bool hasValidFrameSpec(const VideoEncodeConfig& config) noexcept {
+    return isSupportedBitDepth(config.bitDepth) &&
+           findPixelFormatMapping(config.pixelFormat) != nullptr;
+}
+
 CoreStatus validateConfig(const VideoEncodeConfig& config) noexcept {
-    if (config.codec != CodecId::AV1 && config.codec != CodecId::VP9) {
+    if (!isSupportedVideoCodec(config.codec)) {
         return CoreStatus::UnsupportedCodec;
     }
-    if (config.width <= 0 || config.height <= 0) {
-        return CoreStatus::InvalidArgument;
-    }
-    if (config.bitDepth != 8 && config.bitDepth != 10 && config.bitDepth != 12) {
-        return CoreStatus::InvalidArgument;
-    }
-    if (config.gopSize < 0 || config.bitrateBps < 0 || config.frameRate.num <= 0) {
-        return CoreStatus::InvalidArgument;
-    }
-    if (findPixelFormatMapping(config.pixelFormat) == nullptr) {
+    if (!hasValidTimingAndBounds(config) || !hasValidFrameSpec(config)) {
         return CoreStatus::InvalidArgument;
     }
     return CoreStatus::Ok;
@@ -205,18 +219,65 @@ void copyPlaneRows(const uint8_t* src, uint32_t srcStride, uint8_t* dst, int dst
     }
 }
 
+bool isValidSourcePlane(const RawVideoFrame& src, int32_t planeIdx,
+                        const AVFrame* dst, int rows) noexcept {
+    if (src.planes[planeIdx].empty() || src.rowBytes[planeIdx] == 0) {
+        return false;
+    }
+    if (dst->data[planeIdx] == nullptr) {
+        return false;
+    }
+    const size_t requiredBytes = static_cast<size_t>(rows) * src.rowBytes[planeIdx];
+    return src.planes[planeIdx].size() >= requiredBytes;
+}
+
 CoreStatus copyFramePlanes(const RawVideoFrame& src, const PixelFormatMapping& map, AVFrame* dst) noexcept {
     for (int32_t p = 0; p < map.planes; ++p) {
-        if (src.planes[p].empty() || src.rowBytes[p] == 0 || dst->data[p] == nullptr) {
-            return CoreStatus::InvalidArgument;
-        }
         const int rows = (p == 0) ? src.height : (src.height >> map.chromaShiftY);
-        const size_t requiredBytes = static_cast<size_t>(rows) * src.rowBytes[p];
-        if (src.planes[p].size() < requiredBytes) {
+        if (!isValidSourcePlane(src, p, dst, rows)) {
             return CoreStatus::InvalidArgument;
         }
         copyPlaneRows(src.planes[p].data(), src.rowBytes[p], dst->data[p], dst->linesize[p], rows);
     }
+    return CoreStatus::Ok;
+}
+
+std::vector<uint8_t> copyCodecExtradata(const AVCodecContext* ctx) {
+    if (ctx == nullptr || ctx->extradata == nullptr || ctx->extradata_size <= 0) {
+        return {};
+    }
+    return std::vector<uint8_t>(ctx->extradata, ctx->extradata + ctx->extradata_size);
+}
+
+bool matchesEncoderConfig(const RawVideoFrame& frame, const VideoEncodeConfig& config) noexcept {
+    return frame.width == config.width &&
+           frame.height == config.height &&
+           frame.format == config.pixelFormat;
+}
+
+CoreStatus prepareAVFrame(const RawVideoFrame& frame, AVFramePtr& outFrame) {
+    const PixelFormatMapping* pixMap = findPixelFormatMapping(frame.format);
+    AVFramePtr avFrame(av_frame_alloc());
+    if (pixMap == nullptr || !avFrame) {
+        return CoreStatus::EncodeFailed;
+    }
+    avFrame->width = frame.width;
+    avFrame->height = frame.height;
+    avFrame->format = pixMap->avFmt;
+    avFrame->pts = frame.pts;
+    avFrame->duration = frame.duration;
+    avFrame->color_range = lookupColorRange(frame.colorRange);
+    avFrame->colorspace = lookupColorSpace(frame.colorSpace);
+    avFrame->color_trc = lookupColorTransfer(frame.colorTransfer);
+
+    if (av_frame_get_buffer(avFrame.get(), 16) < 0 || av_frame_make_writable(avFrame.get()) < 0) {
+        return CoreStatus::EncodeFailed;
+    }
+    const CoreStatus copyStatus = copyFramePlanes(frame, *pixMap, avFrame.get());
+    if (copyStatus != CoreStatus::Ok) {
+        return copyStatus;
+    }
+    outFrame = std::move(avFrame);
     return CoreStatus::Ok;
 }
 
@@ -301,10 +362,7 @@ CoreStatus CoreVideoEncoder::initialize(const VideoEncodeConfig& config) {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     impl_->config = config;
     impl_->flushed = false;
-    impl_->extradata.clear();
-    if (ctx->extradata != nullptr && ctx->extradata_size > 0) {
-        impl_->extradata.assign(ctx->extradata, ctx->extradata + ctx->extradata_size);
-    }
+    impl_->extradata = copyCodecExtradata(ctx.get());
     impl_->codecCtx = std::move(ctx);
     return CoreStatus::Ok;
 }
@@ -314,33 +372,14 @@ CoreStatus CoreVideoEncoder::encodeFrame(const RawVideoFrame& frame, std::vector
     if (!impl_->codecCtx) {
         return CoreStatus::NotInitialized;
     }
-    if (frame.width != impl_->config.width || frame.height != impl_->config.height ||
-        frame.format != impl_->config.pixelFormat) {
+    if (!matchesEncoderConfig(frame, impl_->config)) {
         return CoreStatus::InvalidArgument;
     }
 
-    const PixelFormatMapping* pixMap = findPixelFormatMapping(frame.format);
-    AVFramePtr avFrame(av_frame_alloc());
-    if (!avFrame || pixMap == nullptr) {
-        return CoreStatus::EncodeFailed;
-    }
-
-    avFrame->width = frame.width;
-    avFrame->height = frame.height;
-    avFrame->format = pixMap->avFmt;
-    avFrame->pts = frame.pts;
-    avFrame->duration = frame.duration;
-    avFrame->color_range = lookupColorRange(frame.colorRange);
-    avFrame->colorspace = lookupColorSpace(frame.colorSpace);
-    avFrame->color_trc = lookupColorTransfer(frame.colorTransfer);
-
-    if (av_frame_get_buffer(avFrame.get(), 16) < 0 || av_frame_make_writable(avFrame.get()) < 0) {
-        return CoreStatus::EncodeFailed;
-    }
-
-    const CoreStatus copyStatus = copyFramePlanes(frame, *pixMap, avFrame.get());
-    if (copyStatus != CoreStatus::Ok) {
-        return copyStatus;
+    AVFramePtr avFrame;
+    const CoreStatus prepStatus = prepareAVFrame(frame, avFrame);
+    if (prepStatus != CoreStatus::Ok) {
+        return prepStatus;
     }
 
     if (avcodec_send_frame(impl_->codecCtx.get(), avFrame.get()) < 0) {
