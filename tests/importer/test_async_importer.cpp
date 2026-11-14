@@ -1,3 +1,4 @@
+#undef NDEBUG
 #include "importer/async_importer.hpp"
 
 #include <cassert>
@@ -9,7 +10,8 @@ using namespace openmedia::importer;
 
 int main() {
     ImAsyncImporterCreationRecExt rec{};
-    assert(AsyncImporterEngine::handleCreateAsyncImporter(&rec) == kImNoErr);
+    const csSDK_int32 create_rc = AsyncImporterEngine::handleCreateAsyncImporter(&rec);
+    assert(create_rc == kImNoErr);
     assert(rec.outAsyncEntry != nullptr);
     assert(rec.outAsyncClose != nullptr);
     assert(rec.inPrivateData != nullptr);
@@ -26,8 +28,9 @@ int main() {
                 engine->storePrefetchedFrame(frame.pts, frame);
                 openmedia::RawVideoFrame out;
                 engine->tryGetPrefetchedFrame(frame.pts, out);
-                assert(AsyncImporterEngine::asyncImporterEntry(
-                    kSelGetSourceVideo, nullptr, engine, &frame.pts) == kImNoErr);
+                const csSDK_int32 entry_rc = AsyncImporterEngine::asyncImporterEntry(
+                    kSelGetSourceVideo, nullptr, engine, &frame.pts);
+                assert(entry_rc == kImNoErr);
             }
         });
     }
@@ -35,7 +38,8 @@ int main() {
         w.join();
     }
     assert(engine->cachedCount() <= 8);
-    assert(AsyncImporterEngine::asyncClose(engine) == kImNoErr);
+    const csSDK_int32 close_rc = AsyncImporterEngine::asyncClose(engine);
+    assert(close_rc == kImNoErr);
 
     std::cout << "[PASS] TC-2.3.1 AsyncImporterEngine 16-thread reentrancy & aiClose passed.\n";
     return 0;
