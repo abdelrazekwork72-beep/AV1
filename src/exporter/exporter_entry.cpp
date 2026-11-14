@@ -9,9 +9,9 @@ struct ContainerSpec {
     prBool previewSupport;
 };
 static constexpr ContainerSpec kContainers[] = {
-    {kExporterMkvFourCC, "OpenMedia Matroska (MKV)", "mkv", 1},
-    {kExporterWebmFourCC, "OpenMedia WebM (VP9/AV1)", "webm", 0},
-    {kExporterMp4FourCC, "OpenMedia AV1 MP4", "mp4", 1},
+    {kExporterMkvFourCC, "OpenMedia Matroska (.mkv)", "mkv", 1},
+    {kExporterWebmFourCC, "OpenMedia WebM (.webm)", "webm", 0},
+    {kExporterMp4FourCC, "OpenMedia AV1 (.mp4)", "mp4", 1},
 };
 csSDK_int32 onStartup(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
     return ExporterEntry::handleStartup(static_cast<ExStartupInfoRecExt*>(param1));
