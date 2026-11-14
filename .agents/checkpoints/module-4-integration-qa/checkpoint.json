@@ -1,18 +1,59 @@
 {
   "moduleId": "module-4-integration-qa",
-  "title": "Module 4: Integration, Packaging & QA",
-  "githubProjectNumber": null,
-  "updatedAt": "2026-11-14T06:03:38Z",
+  "title": "Module 4: System Integration, Host Harness & Packaging",
+  "branch": "feat/module-4-integration-qa",
+  "baseBranch": "main",
+  "updatedAt": "2026-11-14T12:28:00Z",
   "items": {
-    "US-4.1.0": {
-      "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:38Z",
-      "branch": "feat/us-4.1.0-mediacore-host-integration-harness"
+    "us-4.1.0": {
+      "status": "Merged",
+      "branch": "feat/us-4.1.0-mediacore-host-integration-harness",
+      "prNumber": 65,
+      "mergedSha": "13e60dab6c4ede68fc7246cd39c1d48ac2d526f1",
+      "unitCount": 3
     },
-    "US-4.2.0": {
-      "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:38Z",
-      "branch": "feat/us-4.2.0-cpack-distribution-packaging"
+    "us-4.1.0/unit-1": {
+      "status": "Merged",
+      "branch": "feat/us-4.1.0/unit-1-deployment-validator",
+      "prNumber": 62,
+      "mergedSha": "e3ab2caddcc52fc768d3b3a2ccf246241906360a"
+    },
+    "us-4.1.0/unit-2": {
+      "status": "Merged",
+      "branch": "feat/us-4.1.0/unit-2-scrub-latency-benchmark",
+      "prNumber": 61,
+      "mergedSha": "eda58241e5715f45b81da628ac67d81add5717af"
+    },
+    "us-4.1.0/unit-3": {
+      "status": "Merged",
+      "branch": "feat/us-4.1.0/unit-3-ame-harness-cache-purge",
+      "prNumber": 59,
+      "mergedSha": "eb3bf172538a62dd0a1d379c7b6ebe5a6d5a68a4"
+    },
+    "us-4.2.0": {
+      "status": "Merged",
+      "branch": "feat/us-4.2.0-cpack-distribution-packaging",
+      "prNumber": 66,
+      "mergedSha": "e9db4a74ffb8cba672533634e301aeb3589f67f3",
+      "unitCount": 3
+    },
+    "us-4.2.0/unit-1": {
+      "status": "Merged",
+      "branch": "feat/us-4.2.0/unit-1-windows-msi-installer",
+      "prNumber": 60,
+      "mergedSha": "c484e702664445b66e8ee4154bc5da0b0ac505bc"
+    },
+    "us-4.2.0/unit-2": {
+      "status": "Merged",
+      "branch": "feat/us-4.2.0/unit-2-macos-pkg-installer",
+      "prNumber": 63,
+      "mergedSha": "b8398e2feb49173f5f2539fd703c9fb344b82d99"
+    },
+    "us-4.2.0/unit-3": {
+      "status": "Merged",
+      "branch": "feat/us-4.2.0/unit-3-license-compliance-packager",
+      "prNumber": 64,
+      "mergedSha": "3503d8400cf47abb82821ded25020118426e73fd"
     }
   }
 }
