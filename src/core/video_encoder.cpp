@@ -233,7 +233,7 @@ bool isValidSourcePlane(const RawVideoFrame& src, int32_t planeIdx,
 
 CoreStatus copyFramePlanes(const RawVideoFrame& src, const PixelFormatMapping& map, AVFrame* dst) noexcept {
     for (int32_t p = 0; p < map.planes; ++p) {
-        const int rows = (p == 0) ? src.height : (src.height >> map.chromaShiftY);
+        const int rows = (p == 0) ? src.height : ((src.height + (1 << map.chromaShiftY) - 1) >> map.chromaShiftY);
         if (!isValidSourcePlane(src, p, dst, rows)) {
             return CoreStatus::InvalidArgument;
         }
