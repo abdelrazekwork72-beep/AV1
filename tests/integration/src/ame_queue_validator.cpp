@@ -58,6 +58,10 @@ bool AmeQueueValidator::verifyContainerIntegrity(
     if (ext == ".flac") {
         return hasMagic(bytes, {'f', 'L', 'a', 'C'});
     }
+    if (ext == ".mp4") {
+        return bytes.size() >= 8U && bytes[4] == 'f' && bytes[5] == 't' &&
+               bytes[6] == 'y' && bytes[7] == 'p';
+    }
     return false;
 }
 

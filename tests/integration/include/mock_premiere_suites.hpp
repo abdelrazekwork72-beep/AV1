@@ -12,12 +12,50 @@
 #include "PrSDKPPixSuite.h"
 #include "PrSDKPixelFormat.h"
 #include "PrSDKTypes.h"
+#include "openmedia/core_types.hpp"
+#include "importer/importer_types.hpp"
+#include "exporter/exporter_types.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <map>
 #include <string>
 #include <vector>
+
+namespace openmedia::qa {
+
+/// @brief Documented base contract scrub benchmark report (Module 4 README Section 3).
+struct ScrubBenchmarkReport {
+    double minLatencyMs{0.0};
+    double p50LatencyMs{0.0};
+    double p95LatencyMs{0.0};
+    double p99LatencyMs{0.0};
+    double ringBufferSpeedupPercent{0.0};
+    uint32_t totalFramesQueried{0};
+    uint32_t ppixCacheHits{0};
+    uint32_t ringBufferHits{0};
+};
+
+/// @brief Documented base contract AME batch job result (Module 4 README Section 3).
+struct AmeBatchJobResult {
+    std::string jobName;
+    std::string outputPath;
+    bool presetCachePurged{false};
+    bool exportSucceeded{false};
+    bool containerValid{false};
+    size_t memoryDeltaBytes{0};
+};
+
+/// @brief Documented abstract SweetPea host interface (Module 4 README Section 3).
+class IMockSweetPeaHost {
+public:
+    virtual ~IMockSweetPeaHost() = default;
+    virtual void* getSPBasicSuite() = 0;
+    virtual bool purgeAmePresetCache(const std::string& ameAppDataDir) = 0;
+};
+
+} // namespace openmedia::qa
 
 namespace openmedia::integration {
 
@@ -53,7 +91,7 @@ struct MockSPBasicSuite {
 };
 
 /// @brief Headless mock host environment bundling SweetPea suites and stdParms.
-struct MockPremiereHost {
+struct MockPremiereHost : public openmedia::qa::IMockSweetPeaHost {
     MockSPBasicSuite basicSuite{};
     imStdParms importerStdParms{};
     exportStdParms exporterStdParms{};
@@ -64,10 +102,18 @@ struct MockPremiereHost {
     PrSDKAudioSuite audioSuite{};
 
     MockPremiereHost() noexcept {
-        std::memset(&importerStdParms, 0, sizeof(importerStdParms));
-        std::memset(&exporterStdParms, 0, sizeof(exporterStdParms));
+        importerStdParms = imStdParms{};
+        exporterStdParms = exportStdParms{};
         importerStdParms.piSuites = nullptr;
         exporterStdParms.spBasic = &basicSuite;
+    }
+
+    void* getSPBasicSuite() override {
+        return &basicSuite;
+    }
+
+    bool purgeAmePresetCache(const std::string& ameAppDataDir) override {
+        return !ameAppDataDir.empty();
     }
 };
 

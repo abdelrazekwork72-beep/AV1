@@ -284,6 +284,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py")
         )
     endif()
 endif()
+install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_Exporter
+    RUNTIME DESTINATION .
+    LIBRARY DESTINATION .
+    BUNDLE DESTINATION .
+)
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack/MultiCPackConfig.cmake")
     include("${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack/MultiCPackConfig.cmake")
     include(CPack)

@@ -13,7 +13,7 @@ inline constexpr csSDK_int32 kExSelQueryStillSequence = 10;
 
 extern "C" {
 /// @brief Primary Adobe Premiere Pro / Media Encoder exporter entry point.
-DllExport csSDK_int32 PREMPLUGENTRY xSDKExport(csSDK_int32 selector,
+DllExport PREMPLUGENTRY xSDKExport(csSDK_int32 selector,
                                                  exportStdParms* stdParms,
                                                  void* param1,
                                                  void* param2);

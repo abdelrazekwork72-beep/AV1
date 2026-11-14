@@ -61,6 +61,6 @@ csSDK_int32 ExporterEntry::dispatch(csSDK_int32 selector, exportStdParms* stdPar
 }
 } // namespace openmedia::exporter
 
-extern "C" DllExport csSDK_int32 PREMPLUGENTRY xSDKExport(csSDK_int32 selector, exportStdParms* stdParms, void* param1, void* param2) {
+extern "C" DllExport PREMPLUGENTRY xSDKExport(csSDK_int32 selector, exportStdParms* stdParms, void* param1, void* param2) {
     return openmedia::exporter::ExporterEntry::dispatch(selector, stdParms, param1, param2);
 }
