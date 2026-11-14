@@ -1,0 +1,26 @@
+{
+  "name": "some-divide-and-conquer-marketplace",
+  "interface": {
+    "displayName": "Some Divide-and-Conquer Marketplace",
+    "description": "Official OpenAI Codex & cross-agent marketplace catalog for some-divide-and-conquer (v1.1.0).",
+    "logoURL": "./assets/logo.svg",
+    "brandLogoURL": "./assets/some-of-cs-logo.png"
+  },
+  "plugins": [
+    {
+      "name": "some-divide-and-conquer",
+      "logo": "./assets/logo.svg",
+      "orgLogo": "./assets/some-of-cs-logo.png",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "description": "Transform monolithic specs into parallel Modules, User Stories, and non-blocking Implementation Units in isolated Git worktrees with Multi-Council Review, patch-implementer loops, GitHub Projects Kanban, cloudflare/security-audit-skill, and 283 specialist agents across 8 --field presets.",
+      "category": "Development Workflows",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "some-divide-and-conquer",
+  "version": "1.1.0",
+  "description": "Autonomous Divide-and-Conquer multi-agent engineering & domain delivery plugin for OpenAI Codex CLI, Google Antigravity, and Claude Code. Transforms monolithic specifications into parallel Modules, User Stories, and non-blocking Implementation Units inside isolated Git worktrees across 8 industry --field presets.",
+  "logo": "./assets/logo.svg",
+  "orgLogo": "./assets/some-of-cs-logo.png",
+  "license": "Apache-2.0",
+  "keywords": [
+    "codex-plugin",
+    "divide-and-conquer",
+    "multi-agent",
+    "git-worktrees",
+    "code-review-council",
+    "patch-implementer",
+    "github-projects",
+    "agency-agents",
+    "security-audit",
+    "cyclomatic-complexity"
+  ],
+  "author": {
+    "name": "some-of-cs",
+    "url": "https://github.com/some-of-cs/some-divide-and-conquer"
+  },
+  "homepage": "https://github.com/some-of-cs/some-divide-and-conquer",
+  "repository": "https://github.com/some-of-cs/some-divide-and-conquer",
+  "hooks": "./.claude-plugin/hooks.json",
+  "skills": "./skills",
+  "agents": "./agents",
+  "instructions": "./rules/AGENTS.md",
+  "interface": {
+    "displayName": "Some Divide-and-Conquer",
+    "shortDescription": "Decompose monolithic specs into parallel Git worktree units with multi-council review and 283 specialist agents.",
+    "longDescription": "Transforms monolithic specifications into bounded Modules, User Stories, and dynamically sized non-blocking Implementation Units in isolated Git worktrees, governed by multi-council code review, mandatory patch-implementer remediation loops, GitHub Projects Kanban tracking, and 8 industry --field presets.",
+    "category": "Development Workflows",
+    "websiteURL": "https://github.com/some-of-cs/some-divide-and-conquer",
+    "logoURL": "./assets/logo.svg",
+    "iconURL": "./assets/plugin-logo.svg",
+    "brandLogoURL": "./assets/some-of-cs-logo.png",
+    "developerLogoURL": "https://avatars.githubusercontent.com/u/323249724?v=4",
+    "developerName": "Some(CS) (some-of-cs)"
+  }
+}
