@@ -14,6 +14,13 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 
+bool isSampleInUnitRange(float sample) noexcept {
+    if (std::isnan(sample)) {
+        return false;
+    }
+    return sample >= -1.0f && sample <= 1.0f;
+}
+
 bool testPrecisionSnr() {
     constexpr int32_t kSampleRate = 48000;
     constexpr int32_t kNumSamples = 4096;
@@ -37,22 +44,66 @@ bool testPrecisionSnr() {
     return snrDb > 96.0;
 }
 
-bool testClampingBounds() {
-    const float minClamped = openmedia::convertInt16ToFloat32(std::numeric_limits<int16_t>::min());
+bool testExactBoundaryValues() {
+    const float minVal = openmedia::convertInt16ToFloat32(std::numeric_limits<int16_t>::min());
     const float negMax = openmedia::convertInt16ToFloat32(static_cast<int16_t>(-32767));
     const float zero = openmedia::convertInt16ToFloat32(0);
     const float posMax = openmedia::convertInt16ToFloat32(std::numeric_limits<int16_t>::max());
-
-    if (minClamped != -1.0f || negMax != -1.0f || zero != 0.0f || posMax != 1.0f) {
-        std::cerr << "[TC-1.2.3] Boundary mismatch\n";
+    if (minVal != -1.0f || negMax != -1.0f) {
         return false;
     }
+    return zero == 0.0f && posMax == 1.0f;
+}
 
+bool testAllInt16ValuesInBounds() {
     for (int32_t v = std::numeric_limits<int16_t>::min();
          v <= std::numeric_limits<int16_t>::max();
          ++v) {
         const float sample = openmedia::convertInt16ToFloat32(static_cast<int16_t>(v));
-        if (std::isnan(sample) || sample < -1.0f || sample > 1.0f) {
+        if (!isSampleInUnitRange(sample)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool testClampingBounds() {
+    if (!testExactBoundaryValues()) {
+        std::cerr << "[TC-1.2.3] Boundary mismatch\n";
+        return false;
+    }
+    return testAllInt16ValuesInBounds();
+}
+
+void populateChannelPlane(std::vector<float>& plane, int32_t channelIndex, int32_t numSamples) {
+    plane.resize(static_cast<size_t>(numSamples));
+    for (int32_t i = 0; i < numSamples; ++i) {
+        const auto pcm = static_cast<int16_t>(((channelIndex + 1) * 4000) - (i % 1000));
+        plane[static_cast<size_t>(i)] = openmedia::convertInt16ToFloat32(pcm);
+    }
+}
+
+bool verifyChannelPlane(const std::vector<float>& plane, int32_t expectedSamples) {
+    if (static_cast<int32_t>(plane.size()) != expectedSamples) {
+        return false;
+    }
+    for (float val : plane) {
+        if (!isSampleInUnitRange(val)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool verifyAllPlanes(const openmedia::RawAudioBatch& batch, int32_t expectedChannels, int32_t expectedSamples) {
+    if (batch.channels != expectedChannels) {
+        return false;
+    }
+    if (static_cast<int32_t>(batch.channelData.size()) != expectedChannels) {
+        return false;
+    }
+    for (int32_t ch = 0; ch < expectedChannels; ++ch) {
+        if (!verifyChannelPlane(batch.channelData[static_cast<size_t>(ch)], expectedSamples)) {
             return false;
         }
     }
@@ -71,27 +122,10 @@ bool testSurround51PlanarLayout() {
     batch.channelData.resize(static_cast<size_t>(kChannels51));
 
     for (int32_t ch = 0; ch < kChannels51; ++ch) {
-        batch.channelData[static_cast<size_t>(ch)].resize(static_cast<size_t>(kSamplesPerChannel));
-        for (int32_t i = 0; i < kSamplesPerChannel; ++i) {
-            const auto pcm = static_cast<int16_t>(((ch + 1) * 4000) - (i % 1000));
-            batch.channelData[static_cast<size_t>(ch)][static_cast<size_t>(i)] =
-                openmedia::convertInt16ToFloat32(pcm);
-        }
+        populateChannelPlane(batch.channelData[static_cast<size_t>(ch)], ch, kSamplesPerChannel);
     }
-
-    if (batch.channels != 6 || static_cast<int32_t>(batch.channelData.size()) != 6) {
+    if (!verifyAllPlanes(batch, kChannels51, kSamplesPerChannel)) {
         return false;
-    }
-    for (int32_t ch = 0; ch < kChannels51; ++ch) {
-        const auto& plane = batch.channelData[static_cast<size_t>(ch)];
-        if (static_cast<int32_t>(plane.size()) != kSamplesPerChannel) {
-            return false;
-        }
-        for (float val : plane) {
-            if (val < -1.0f || val > 1.0f) {
-                return false;
-            }
-        }
     }
     return batch.channelData[0][0] != batch.channelData[5][0];
 }

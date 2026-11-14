@@ -75,30 +75,44 @@ AVCodecID mapCodecId(const StreamInfo& stream) noexcept {
     }
 }
 
+bool isValidInitParams(const StreamInfo& stream, int32_t targetSampleRate) noexcept {
+    if (targetSampleRate <= 0) {
+        return false;
+    }
+    return stream.channels >= 0 && stream.channels <= kMaxAudioChannels;
+}
+
+const AVCodec* findDecoderForStream(const StreamInfo& stream) noexcept {
+    const AVCodecID codecId = mapCodecId(stream);
+    if (codecId == AV_CODEC_ID_NONE) {
+        return nullptr;
+    }
+    return avcodec_find_decoder(codecId);
+}
+
+bool isValidFrameFormat(const AVFrame* frame) noexcept {
+    const int32_t channels = frame->ch_layout.nb_channels;
+    if (channels <= 0 || channels > kMaxAudioChannels) {
+        return false;
+    }
+    return frame->sample_rate > 0;
+}
+
 } // namespace
 
 class CoreAudioDecoder::Impl {
 public:
     CoreStatus initialize(const StreamInfo& stream, int32_t targetSampleRate) {
-        if (targetSampleRate <= 0 || stream.channels < 0 || stream.channels > kMaxAudioChannels) {
+        if (!isValidInitParams(stream, targetSampleRate)) {
             return CoreStatus::InvalidArgument;
         }
-        const AVCodecID codecId = mapCodecId(stream);
-        if (codecId == AV_CODEC_ID_NONE) {
-            return CoreStatus::UnsupportedCodec;
-        }
-        const AVCodec* codec = avcodec_find_decoder(codecId);
+        const AVCodec* codec = findDecoderForStream(stream);
         if (!codec) {
             return CoreStatus::UnsupportedCodec;
         }
-        codecCtx_.reset(avcodec_alloc_context3(codec));
-        if (!codecCtx_) {
-            return CoreStatus::OpenFailed;
-        }
-        if (configureContext(stream) != CoreStatus::Ok ||
-            avcodec_open2(codecCtx_.get(), codec, nullptr) < 0) {
-            codecCtx_.reset();
-            return CoreStatus::OpenFailed;
+        const CoreStatus openStatus = openCodecContext(stream, codec);
+        if (openStatus != CoreStatus::Ok) {
+            return openStatus;
         }
         return finalizeInit(targetSampleRate);
     }
@@ -136,10 +150,10 @@ public:
         if (drainStatus != CoreStatus::Ok) {
             return drainStatus;
         }
-        if (pendingSampleCount() == 0) {
-            return eofReached_ ? CoreStatus::EndOfFile : CoreStatus::NeedMoreData;
+        if (pendingSampleCount() > 0) {
+            return popBatch(maxSamples, outBatch);
         }
-        return popBatch(maxSamples, outBatch);
+        return eofReached_ ? CoreStatus::EndOfFile : CoreStatus::NeedMoreData;
     }
 
     CoreStatus flush() {
@@ -170,6 +184,22 @@ public:
     }
 
 private:
+    CoreStatus openCodecContext(const StreamInfo& stream, const AVCodec* codec) {
+        codecCtx_.reset(avcodec_alloc_context3(codec));
+        if (!codecCtx_) {
+            return CoreStatus::OpenFailed;
+        }
+        if (configureContext(stream) != CoreStatus::Ok) {
+            codecCtx_.reset();
+            return CoreStatus::OpenFailed;
+        }
+        if (avcodec_open2(codecCtx_.get(), codec, nullptr) < 0) {
+            codecCtx_.reset();
+            return CoreStatus::OpenFailed;
+        }
+        return CoreStatus::Ok;
+    }
+
     CoreStatus configureContext(const StreamInfo& stream) {
         if (stream.sampleRate > 0) {
             codecCtx_->sample_rate = stream.sampleRate;
@@ -204,41 +234,68 @@ private:
         return CoreStatus::Ok;
     }
 
-    CoreStatus ensureResampler(const AVFrame* frame) {
-        const int32_t channels = frame->ch_layout.nb_channels;
-        if (channels <= 0 || channels > kMaxAudioChannels || frame->sample_rate <= 0) {
-            return CoreStatus::InvalidArgument;
+    bool matchesActiveResampler(const AVFrame* frame) const noexcept {
+        if (!swrCtx_) {
+            return false;
         }
-        const auto fmt = static_cast<AVSampleFormat>(frame->format);
-        if (swrCtx_ && channels == activeChannels_ &&
-            frame->sample_rate == inSampleRate_ && fmt == inSampleFmt_) {
-            return CoreStatus::Ok;
+        if (frame->ch_layout.nb_channels != activeChannels_) {
+            return false;
         }
+        if (frame->sample_rate != inSampleRate_) {
+            return false;
+        }
+        return static_cast<AVSampleFormat>(frame->format) == inSampleFmt_;
+    }
+
+    SwrContext* createResampler(const AVFrame* frame) const noexcept {
         AVChannelLayout outLayout{};
-        av_channel_layout_default(&outLayout, channels);
+        av_channel_layout_default(&outLayout, frame->ch_layout.nb_channels);
         SwrContext* rawSwr = nullptr;
         const int ret = swr_alloc_set_opts2(
             &rawSwr, &outLayout, AV_SAMPLE_FMT_FLTP, targetSampleRate_,
-            &frame->ch_layout, fmt, frame->sample_rate, 0, nullptr);
+            &frame->ch_layout, static_cast<AVSampleFormat>(frame->format),
+            frame->sample_rate, 0, nullptr);
         av_channel_layout_uninit(&outLayout);
-        if (ret < 0 || !rawSwr || swr_init(rawSwr) < 0) {
+        if (ret < 0 || !rawSwr) {
             swr_free(&rawSwr);
+            return nullptr;
+        }
+        if (swr_init(rawSwr) < 0) {
+            swr_free(&rawSwr);
+            return nullptr;
+        }
+        return rawSwr;
+    }
+
+    CoreStatus ensureResampler(const AVFrame* frame) {
+        if (!isValidFrameFormat(frame)) {
+            return CoreStatus::InvalidArgument;
+        }
+        if (matchesActiveResampler(frame)) {
+            return CoreStatus::Ok;
+        }
+        SwrContext* rawSwr = createResampler(frame);
+        if (!rawSwr) {
             return CoreStatus::DecodeFailed;
         }
         swrCtx_.reset(rawSwr);
-        activeChannels_ = channels;
+        activeChannels_ = frame->ch_layout.nb_channels;
         inSampleRate_ = frame->sample_rate;
-        inSampleFmt_ = fmt;
+        inSampleFmt_ = static_cast<AVSampleFormat>(frame->format);
         return CoreStatus::Ok;
+    }
+
+    void updatePtsIfEmpty(int64_t framePts) noexcept {
+        if (pendingSampleCount() == 0 && framePts != AV_NOPTS_VALUE) {
+            nextPts_ = framePts;
+        }
     }
 
     CoreStatus appendResampledData(int32_t outSamples, int64_t framePts) {
         if (outSamples <= 0) {
             return CoreStatus::Ok;
         }
-        if (pendingSampleCount() == 0 && framePts != AV_NOPTS_VALUE) {
-            nextPts_ = framePts;
-        }
+        updatePtsIfEmpty(framePts);
         pendingSamples_.resize(static_cast<size_t>(activeChannels_));
         for (int32_t ch = 0; ch < activeChannels_; ++ch) {
             auto& dst = pendingSamples_[static_cast<size_t>(ch)];
