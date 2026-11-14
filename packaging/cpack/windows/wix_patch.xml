@@ -1,0 +1,11 @@
+<CPackWiXPatch>
+  <CPackWiXFragment Id="#PRODUCT">
+    <!-- Enforce Administrator/perMachine ACLs (TM-4.2.1 / CWE-732) and silent /qn support -->
+    <Property Id="ALLUSERS" Value="1" />
+    <Property Id="MSIINSTALLPERUSER" Value="" />
+    <Property Id="OPENMEDIA_MEDIACORE_TARGET" Value="C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore" />
+    <Condition Message="Administrator privileges are required to install MediaCore 7.0 plugins.">
+      Privileged
+    </Condition>
+  </CPackWiXFragment>
+</CPackWiXPatch>

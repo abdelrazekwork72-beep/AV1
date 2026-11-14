@@ -229,3 +229,62 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/exporter")
         add_test(NAME "${test_name}" COMMAND "${test_name}")
     endforeach()
 endif()
+
+# Module 4: MediaCore Host Integration & Benchmark Harness (US-4.1.0)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
+    add_library(openmedia_integration_harness STATIC
+        tests/integration/src/deployment_validator.cpp
+        tests/integration/src/scrub_benchmark.cpp
+        tests/integration/src/ame_queue_validator.cpp
+    )
+    target_include_directories(openmedia_integration_harness PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks/mock_sdk/Examples/Headers"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(openmedia_integration_harness PUBLIC ${CMAKE_DL_LIBS})
+    endif()
+    openmedia_apply_warnings(openmedia_integration_harness)
+    foreach(integ_test IN ITEMS
+        test_deployment_validator
+        test_scrub_benchmark
+        test_ame_queue_validator
+    )
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/${integ_test}.cpp")
+            add_executable("${integ_test}" "tests/integration/${integ_test}.cpp")
+            target_link_libraries("${integ_test}" PRIVATE openmedia_integration_harness OpenMediaCore)
+            openmedia_apply_warnings("${integ_test}")
+            add_test(NAME "${integ_test}" COMMAND "${integ_test}")
+        endif()
+    endforeach()
+endif()
+
+# Module 4: Cross-Platform CPack Packaging & License Audit (US-4.2.0)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_windows_cpack.cmake")
+    add_test(
+        NAME test_windows_cpack
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_windows_cpack.cmake"
+    )
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_macos_cpack.cmake")
+    add_test(
+        NAME test_macos_cpack
+        COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_macos_cpack.cmake"
+    )
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py")
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(
+            NAME test_license_audit
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py"
+        )
+    endif()
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack/MultiCPackConfig.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack/MultiCPackConfig.cmake")
+    include(CPack)
+endif()
