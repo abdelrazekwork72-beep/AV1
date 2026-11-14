@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "ci-mock-sdk",
+      "displayName": "CI Build with Clean-Room Mock Adobe SDK",
+      "binaryDir": "${sourceDir}/build/ci-mock-sdk",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ADOBE_PP_SDK": "${sourceDir}/tests/mocks/mock_sdk"
+      }
+    }
+  ]
+}

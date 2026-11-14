@@ -10,3 +10,5 @@ enum PrPixelFormat : csSDK_uint32 {
     PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u = 0x59563133,
     PrPixelFormat_RGB_444_10u = 0x5231304B
 };
+
+constexpr PrPixelFormat PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709 = PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u;
