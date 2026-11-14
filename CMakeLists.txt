@@ -20,6 +20,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindAdobeSDK.cmake")
 
+function(openmedia_enable_test_assertions target_name)
+    if(MSVC)
+        target_compile_options("${target_name}" PRIVATE /UNDEBUG)
+    else()
+        target_compile_options("${target_name}" PRIVATE -UNDEBUG)
+    endif()
+endfunction()
+
 function(openmedia_resolve_ffmpeg out_found out_libs out_incs)
     find_package(FFMPEG QUIET)
     if(FFMPEG_FOUND)
@@ -213,6 +221,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/core")
         add_executable("${test_name}" "${test_src}")
         target_link_libraries("${test_name}" PRIVATE OpenMediaCore)
         openmedia_apply_warnings("${test_name}")
+        openmedia_enable_test_assertions("${test_name}")
         add_test(
             NAME "${test_name}"
             COMMAND "${test_name}"
@@ -230,6 +239,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/importer")
         add_executable("${test_name}" "${test_src}")
         target_link_libraries("${test_name}" PRIVATE OpenMedia_Importer_obj OpenMediaCore)
         openmedia_apply_warnings("${test_name}")
+        openmedia_enable_test_assertions("${test_name}")
         add_test(
             NAME "${test_name}"
             COMMAND "${test_name}"
@@ -247,6 +257,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/exporter")
         add_executable("${test_name}" "${test_src}")
         target_link_libraries("${test_name}" PRIVATE OpenMedia_Exporter_obj OpenMediaCore)
         openmedia_apply_warnings("${test_name}")
+        openmedia_enable_test_assertions("${test_name}")
         add_test(
             NAME "${test_name}"
             COMMAND "${test_name}"
@@ -290,6 +301,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
                 OpenMediaCore
             )
             openmedia_apply_warnings("${integ_test}")
+            openmedia_enable_test_assertions("${integ_test}")
             add_test(
                 NAME "${integ_test}"
                 COMMAND "${integ_test}"
