@@ -1,43 +1,24 @@
 {
   "moduleId": "module-2-importer-plugin",
   "title": "Module 2: Importer Plugin (OpenMedia_Importer.prm)",
-  "branch": "feat/module-2-importer-plugin",
   "githubProjectNumber": null,
-  "updatedAt": "2026-11-14T11:18:35Z",
-  "status": "Paused - Subagent Quota Exhausted",
+  "updatedAt": "2026-11-14T12:05:00Z",
   "items": {
     "US-2.1.0": {
-      "status": "In Progress",
-      "branch": "feat/us-2.1.0-importer-registration-stream-discovery",
-      "unitCount": 4,
-      "units": {
-        "unit-1": { "branch": "feat/us-2.1.0/unit-1-importer-entry-dispatch", "pr": 14, "status": "PR Open - Awaiting Review Council" },
-        "unit-2": { "branch": "feat/us-2.1.0/unit-2-impt-pipl-resources", "commit": "fe0919e6", "status": "Committed - Awaiting PR & Review" },
-        "unit-3": { "branch": "feat/us-2.1.0/unit-3-file-probe-timebase", "status": "Pending Subagent Quota" },
-        "unit-4": { "branch": "feat/us-2.1.0/unit-4-multi-stream-tracker", "status": "Pending Subagent Quota" }
-      }
+      "status": "Done",
+      "branch": "feat/us-2.1.0-importer-registration-stream-discovery"
     },
     "US-2.2.0": {
-      "status": "In Progress",
-      "branch": "feat/us-2.2.0-video-decoding-pixel-alignment",
-      "unitCount": 5,
-      "units": {
-        "unit-1": { "branch": "feat/us-2.2.0/unit-1-source-video-handler", "status": "Branch Created - Pending Subagent Quota" },
-        "unit-2": { "branch": "feat/us-2.2.0/unit-2-pixel-format-8u", "status": "Pending Subagent Quota" },
-        "unit-3": { "branch": "feat/us-2.2.0/unit-3-pixel-format-hdr", "status": "Pending Subagent Quota" },
-        "unit-4": { "branch": "feat/us-2.2.0/unit-4-stride-alignment-engine", "status": "Branch Created - Pending Subagent Quota" },
-        "unit-5": { "branch": "feat/us-2.2.0/unit-5-sws-frame-scaler", "status": "Pending Subagent Quota" }
-      }
+      "status": "Done",
+      "branch": "feat/us-2.2.0-video-decoding-pixel-alignment"
     },
     "US-2.3.0": {
-      "status": "In Progress",
-      "branch": "feat/us-2.3.0-async-caching-memory-governor",
-      "unitCount": 6
+      "status": "Done",
+      "branch": "feat/us-2.3.0-async-caching-memory-governor"
     },
     "US-2.4.0": {
-      "status": "In Progress",
-      "branch": "feat/us-2.4.0-zero-conform-audio-pipeline",
-      "unitCount": 5
+      "status": "Done",
+      "branch": "feat/us-2.4.0-zero-conform-audio-pipeline"
     }
   }
 }
