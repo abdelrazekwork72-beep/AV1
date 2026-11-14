@@ -1,18 +1,73 @@
 {
   "moduleId": "module-1-core-engine",
   "title": "Module 1: OpenMediaCore Shared Engine",
+  "branch": "feat/module-1-core-engine",
   "githubProjectNumber": null,
-  "updatedAt": "2026-11-14T06:03:34Z",
+  "updatedAt": "2026-11-14T09:35:00Z",
   "items": {
     "US-1.1.0": {
+      "status": "In Progress",
+      "updatedAt": "2026-11-14T09:35:00Z",
+      "branch": "feat/us-1.1.0-build-system-vcpkg",
+      "prNumber": null,
+      "mergedSha": null,
+      "unitCount": 3
+    },
+    "US-1.1.0/unit-1": {
       "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:33Z",
-      "branch": "feat/us-1.1.0-build-system-vcpkg"
+      "branch": "feat/us-1.1.0/unit-1-cmake-core-targets",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "US-1.1.0/unit-2": {
+      "status": "Todo",
+      "branch": "feat/us-1.1.0/unit-2-vcpkg-manifest-deps",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "US-1.1.0/unit-3": {
+      "status": "Todo",
+      "branch": "feat/us-1.1.0/unit-3-adobe-sdk-resolver",
+      "prNumber": null,
+      "mergedSha": null
     },
     "US-1.2.0": {
+      "status": "In Progress",
+      "updatedAt": "2026-11-14T09:35:00Z",
+      "branch": "feat/us-1.2.0-core-media-library",
+      "prNumber": null,
+      "mergedSha": null,
+      "unitCount": 5
+    },
+    "US-1.2.0/unit-1": {
       "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:34Z",
-      "branch": "feat/us-1.2.0-core-media-library"
+      "branch": "feat/us-1.2.0/unit-1-core-demuxer",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "US-1.2.0/unit-2": {
+      "status": "Todo",
+      "branch": "feat/us-1.2.0/unit-2-video-decoder",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "US-1.2.0/unit-3": {
+      "status": "Todo",
+      "branch": "feat/us-1.2.0/unit-3-audio-decoder",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "US-1.2.0/unit-4": {
+      "status": "Todo",
+      "branch": "feat/us-1.2.0/unit-4-video-encoder",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "US-1.2.0/unit-5": {
+      "status": "Todo",
+      "branch": "feat/us-1.2.0/unit-5-core-muxer-audio-enc",
+      "prNumber": null,
+      "mergedSha": null
     }
   }
 }

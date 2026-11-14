@@ -1,2 +1,12 @@
 .worktrees/
-
+build/
+out/
+vcpkg_installed/
+*.prm
+*.bundle
+*.dll
+*.dylib
+*.so
+Premiere_Pro_SDK/
+Adobe_Premiere_Pro_SDK/
+!tests/mocks/mock_sdk/
