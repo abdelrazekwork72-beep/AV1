@@ -6,6 +6,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+foreach(cfg IN ITEMS Debug Release RelWithDebInfo MinSizeRel)
+    string(TOUPPER "${cfg}" cfg_upper)
+    set("CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg_upper}" "${CMAKE_BINARY_DIR}/bin")
+    set("CMAKE_LIBRARY_OUTPUT_DIRECTORY_${cfg_upper}" "${CMAKE_BINARY_DIR}/bin")
+    set("CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${cfg_upper}" "${CMAKE_BINARY_DIR}/lib")
+endforeach()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CompilerWarnings.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindAdobeSDK.cmake")
@@ -167,6 +177,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/build/test_cmake_targets.cmake")
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/build/test_cmake_targets.cmake"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 endif()
 
@@ -177,6 +188,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/build/test_vcpkg_manifest.py")
             NAME test_vcpkg_manifest
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/build/test_vcpkg_manifest.py"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         )
     endif()
 endif()
@@ -188,6 +200,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/build/test_find_adobe_sdk.cmake")
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/build/test_find_adobe_sdk.cmake"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 endif()
 
@@ -200,7 +213,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/core")
         add_executable("${test_name}" "${test_src}")
         target_link_libraries("${test_name}" PRIVATE OpenMediaCore)
         openmedia_apply_warnings("${test_name}")
-        add_test(NAME "${test_name}" COMMAND "${test_name}")
+        add_test(
+            NAME "${test_name}"
+            COMMAND "${test_name}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
     endforeach()
 endif()
 
@@ -213,7 +230,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/importer")
         add_executable("${test_name}" "${test_src}")
         target_link_libraries("${test_name}" PRIVATE OpenMedia_Importer_obj OpenMediaCore)
         openmedia_apply_warnings("${test_name}")
-        add_test(NAME "${test_name}" COMMAND "${test_name}")
+        add_test(
+            NAME "${test_name}"
+            COMMAND "${test_name}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
     endforeach()
 endif()
 
@@ -226,7 +247,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/exporter")
         add_executable("${test_name}" "${test_src}")
         target_link_libraries("${test_name}" PRIVATE OpenMedia_Exporter_obj OpenMediaCore)
         openmedia_apply_warnings("${test_name}")
-        add_test(NAME "${test_name}" COMMAND "${test_name}")
+        add_test(
+            NAME "${test_name}"
+            COMMAND "${test_name}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
     endforeach()
 endif()
 
@@ -242,6 +267,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks/mock_sdk/Examples/Headers"
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
+    target_link_libraries(openmedia_integration_harness PUBLIC
+        OpenMedia_Importer_obj
+        OpenMedia_Exporter_obj
+        OpenMediaCore
+    )
     if(UNIX AND NOT APPLE)
         target_link_libraries(openmedia_integration_harness PUBLIC ${CMAKE_DL_LIBS})
     endif()
@@ -253,9 +283,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
     )
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/${integ_test}.cpp")
             add_executable("${integ_test}" "tests/integration/${integ_test}.cpp")
-            target_link_libraries("${integ_test}" PRIVATE openmedia_integration_harness OpenMediaCore)
+            target_link_libraries("${integ_test}" PRIVATE
+                openmedia_integration_harness
+                OpenMedia_Importer_obj
+                OpenMedia_Exporter_obj
+                OpenMediaCore
+            )
             openmedia_apply_warnings("${integ_test}")
-            add_test(NAME "${integ_test}" COMMAND "${integ_test}")
+            add_test(
+                NAME "${integ_test}"
+                COMMAND "${integ_test}"
+                WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            )
         endif()
     endforeach()
 endif()
@@ -266,6 +305,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_windows_cpack.cmake"
         NAME test_windows_cpack
         COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_windows_cpack.cmake"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_macos_cpack.cmake")
@@ -273,6 +313,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_macos_cpack.cmake")
         NAME test_macos_cpack
         COMMAND "${CMAKE_COMMAND}" "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_macos_cpack.cmake"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     )
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py")
@@ -281,14 +322,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py")
         add_test(
             NAME test_license_audit
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         )
     endif()
 endif()
+
 install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_Exporter
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .
     BUNDLE DESTINATION .
 )
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md" DESTINATION .)
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack/MultiCPackConfig.cmake")
     include("${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack/MultiCPackConfig.cmake")
