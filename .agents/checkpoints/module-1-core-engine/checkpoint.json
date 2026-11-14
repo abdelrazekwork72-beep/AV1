@@ -1,18 +1,68 @@
 {
   "moduleId": "module-1-core-engine",
   "title": "Module 1: OpenMediaCore Shared Engine",
+  "branch": "feat/module-1-core-engine",
   "githubProjectNumber": null,
-  "updatedAt": "2026-11-14T06:03:34Z",
+  "updatedAt": "2026-11-14T09:53:00Z",
   "items": {
     "US-1.1.0": {
-      "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:33Z",
-      "branch": "feat/us-1.1.0-build-system-vcpkg"
+      "status": "Merged",
+      "branch": "feat/us-1.1.0-build-system-vcpkg",
+      "prNumber": 9,
+      "mergedSha": "670efd80d38c41829f7a40ea87857af249918b88",
+      "unitCount": 3
+    },
+    "US-1.1.0/unit-1": {
+      "status": "Merged",
+      "branch": "feat/us-1.1.0/unit-1-cmake-core-targets",
+      "prNumber": 2
+    },
+    "US-1.1.0/unit-2": {
+      "status": "Merged",
+      "branch": "feat/us-1.1.0/unit-2-vcpkg-manifest-deps",
+      "prNumber": 1
+    },
+    "US-1.1.0/unit-3": {
+      "status": "Merged",
+      "branch": "feat/us-1.1.0/unit-3-adobe-sdk-resolver",
+      "prNumber": 8
     },
     "US-1.2.0": {
-      "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:34Z",
-      "branch": "feat/us-1.2.0-core-media-library"
+      "status": "Merged",
+      "branch": "feat/us-1.2.0-core-media-library",
+      "prNumber": 10,
+      "mergedSha": "28f6c663fdaf2ab033182f65609de516d9d2b760",
+      "unitCount": 5
+    },
+    "US-1.2.0/unit-1": {
+      "status": "Merged",
+      "branch": "feat/us-1.2.0/unit-1-core-demuxer",
+      "prNumber": 3
+    },
+    "US-1.2.0/unit-2": {
+      "status": "Merged",
+      "branch": "feat/us-1.2.0/unit-2-video-decoder",
+      "prNumber": 4
+    },
+    "US-1.2.0/unit-3": {
+      "status": "Merged",
+      "branch": "feat/us-1.2.0/unit-3-audio-decoder",
+      "prNumber": 5
+    },
+    "US-1.2.0/unit-4": {
+      "status": "Merged",
+      "branch": "feat/us-1.2.0/unit-4-video-encoder",
+      "prNumber": 6
+    },
+    "US-1.2.0/unit-5": {
+      "status": "Merged",
+      "branch": "feat/us-1.2.0/unit-5-core-muxer-audio-enc",
+      "prNumber": 7
+    },
+    "US-1.2.0/patch-1": {
+      "status": "Merged",
+      "branch": "patch/us-1.2.0-story-fixes",
+      "prNumber": 11
     }
   }
 }
