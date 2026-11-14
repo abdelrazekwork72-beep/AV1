@@ -1,70 +1,101 @@
-# Module 4: Integration, Packaging & QA (`module-4-integration-qa`)
+# Module 4: System Integration, Host Harness & Packaging (`module-4-integration-qa`)
 
-## 1. Module Overview & Architectural Role
-
-Module 4 provides the end-to-end integration, performance benchmarking, packaging, and regulatory licensing compliance infrastructure for the entire OpenMedia project.
-
-While Modules 1, 2, and 3 build the shared core library, importer plugin, and exporter plugin respectively, Module 4 guarantees that:
-1. Both plugins deploy and function seamlessly inside real Adobe Premiere Pro and Adobe Media Encoder runtime environments.
-2. Timeline scrub latency achieves the critical benchmark of $< 50\,\text{ms}$ per frame across 4K/8K 10-bit AV1 assets.
-3. Multi-platform installer packages (Windows MSI/EXE and macOS PKG/DMG) are generated automatically with silent installation switches for enterprise studio rollouts.
-4. Open-source licensing boundaries (GPL/LGPL for FFmpeg and SVT-AV1, MIT/Apache-2.0 for plugin wrappers, zero proprietary Adobe SDK headers committed) are audited automatically in CI/CD pipelines.
+- **Module Identifier**: `module-4-integration-qa`
+- **Module Branch**: `feat/module-4-integration-qa`
+- **Field Profile**: `software` (`.agents/field-profile.json`)
+- **Primary Deliverables**:
+  1. Headless MediaCore Host Mock Harness simulating `xImportEntry` (`imGetSourceVideo`, `imCreateAsyncImporter`, `imImportAudio7`) and `xSDKExport` (`exSelStartup`, `DoMultiPassExportLoop`) selector lifecycles.
+  2. Real-time timeline scrubbing latency benchmark verifying $< 50\,\text{ms}$ p95 frame delivery and 5%–20% GOP RingBuffer speedup.
+  3. Adobe Media Encoder (AME) test harness workflow with automated purging of `Placeholder Preset.epr` and `batch.xml` upon parameter schema updates.
+  4. Cross-platform `MultiCPackConfig.cmake` installer pipeline generating Windows `.msi`/`.exe` (`C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`) and macOS `.pkg`/`.dmg` (`/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore`) with automated SPDX dual-license compliance auditing.
 
 ---
 
-## 2. Integration & Deployment Topology
+## 1. Module Overview & Integration Topology
 
 ```mermaid
-graph TD
-    A[libOpenMediaCore.dll / dylib] --> C[OpenMedia_Importer.prm]
-    A --> D[OpenMedia_Exporter.prm]
-    
-    subgraph Host Integration Harness
-        C --> E[Headless MediaCore Mock Harness]
-        D --> E
-        E --> F[Scrub Latency Benchmark < 50ms]
-        E --> G[AME Batch Queue Validator]
+flowchart TD
+    Core["libOpenMediaCore (.dll / .dylib)"] --> Imp["OpenMedia_Importer (.prm / .bundle)"]
+    Core --> Exp["OpenMedia_Exporter (.prm / .bundle)"]
+
+    subgraph HostHarness ["Host Integration & Benchmark Harness (US-4.1.0)"]
+        Imp --> Validator["DeploymentValidator (unit-1)<br/>(Dynamic Symbol & SweetPea Handshake)"]
+        Exp --> Validator
+        Validator --> Scrub["ScrubLatencyBenchmark (unit-2)<br/>(imGetSourceVideo & AsyncImporterEntry < 50ms p95)"]
+        Validator --> AME["AmeQueueValidator (unit-3)<br/>(Placeholder Preset.epr & batch.xml Purge + 5-Job Queue)"]
     end
-    
-    subgraph Packaging & Distribution
-        C --> H[CPack Multi-Platform Generator]
-        D --> H
-        A --> H
-        H --> I[Windows MSI Installer]
-        H --> J[macOS PKG / DMG Installer]
-    end
-    
-    subgraph Compliance Auditing
-        H --> K[SPDX Dual-License Audit Gate]
-        K --> L[Release Artifacts]
+
+    subgraph Packaging ["MultiCPackConfig & Dual-License Gate (US-4.2.0)"]
+        Imp --> CPack["MultiCPackConfig.cmake (unit-3)"]
+        Exp --> CPack
+        Core --> CPack
+        CPack --> WinMSI["Windows WiX/NSIS Installer (unit-1)<br/>(C:\\Program Files\\Adobe\\Common\\Plug-ins\\7.0\\MediaCore)"]
+        CPack --> MacPKG["macOS productbuild/DMG Installer (unit-2)<br/>(/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore)"]
+        CPack --> Audit["SPDX Dual-License & Zero-Adobe-Header Auditor (unit-3)"]
     end
 ```
 
 ---
 
-## 3. User Story Specifications in this Module
+## 2. User Story Index & Dynamic Unit Sizing
 
-| Story ID | Story Title | Sizing Score | Dynamic $K$ Units | Branch Name | Spec Kit Path |
-| :--- | :--- | :---: | :---: | :--- | :--- |
-| **`US-4.1.0`** | MediaCore Host Integration & Real-Time Timeline Scrubbing Benchmark Harness | **2.00** | **$K = 3$** | `feat/us-4.1.0-mediacore-host-integration-harness` | [`us-4.1.0-mediacore-host-integration-harness.md`](./us-4.1.0-mediacore-host-integration-harness.md) |
-| **`US-4.2.0`** | Cross-Platform CPack Distribution, Dual-License Compliance & CI/CD Packaging | **2.00** | **$K = 3$** | `feat/us-4.2.0-cpack-distribution-packaging` | [`us-4.2.0-cpack-distribution-packaging.md`](./us-4.2.0-cpack-distribution-packaging.md) |
-
----
-
-## 4. Key Architectural Invariants
-
-1. **Adobe MediaCore Install Targets**:
-   - Windows: `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`
-   - macOS: `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/`
-2. **Deterministic Benchmark Scenarios**: Latency benchmark tests evaluate sequential playback, random seek jumps ($\pm 1,000$ frames), and reverse scrub sweeps at $2\times$ speed.
-3. **Zero Proprietary Header Distribution**: Built binaries never distribute proprietary Adobe SDK headers. Installer bundles only compiled binary plugins and necessary open-source runtime DLLs.
-4. **SPDX License Clear**: All distributed files carry explicit SPDX license identifiers (`GPL-3.0-or-later`, `LGPL-3.0-or-later`, or `Apache-2.0`).
+| Story ID | Branch | Title | Score ($S_{\text{story}}$) | Unit Count ($K$) | Status |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| **`US-4.1.0`** | `feat/us-4.1.0-mediacore-host-integration-harness` | MediaCore Host Verification, AME Harness & Scrub Benchmarks | **2.00** | **3 Units** | `Ready` |
+| **`US-4.2.0`** | `feat/us-4.2.0-cpack-distribution-packaging` | Cross-Platform MultiCPackConfig Packaging & License Audit | **2.00** | **3 Units** | `Ready` |
 
 ---
 
-## 5. Base Contract & Test Fixtures Seeding Plan
+## 3. Base Contract Seeding for Module 4 (`tests/integration/include/mock_premiere_suites.hpp`)
 
-Before parallel unit implementers are spawned, the following synthetic media fixtures and mock headers are placed in `tests/fixtures/`:
-- `test_av1_10bit_4k.mkv`: 10-second synthetic AV1 10-bit YUV 4:2:0 sample video.
-- `test_vp9_opus.webm`: 10-second synthetic VP9 video with Opus stereo audio.
-- `MockPremiereHostSuites.h`: Mock implementations of `PrSDKPPixSuite`, `PrSDKMemorySuite`, `PrSDKSequenceRenderSuite`, and `PrSDKExportProgressSuite`.
+To maintain **Invariant B (Zero Inter-Unit Blocking)** across all 6 units in Module 4, the mock SweetPea host suites contract is pre-seeded on `feat/module-4-integration-qa`:
+
+```cpp
+// tests/integration/include/mock_premiere_suites.hpp
+#pragma once
+#include <openmedia/core_types.hpp>
+#include <importer/importer_types.hpp>
+#include <exporter/exporter_types.hpp>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace openmedia::qa {
+
+struct ScrubBenchmarkReport {
+    double minLatencyMs{0.0};
+    double p50LatencyMs{0.0};
+    double p95LatencyMs{0.0};
+    double p99LatencyMs{0.0};
+    double ringBufferSpeedupPercent{0.0};
+    uint32_t totalFramesQueried{0};
+    uint32_t ppixCacheHits{0};
+    uint32_t ringBufferHits{0};
+};
+
+struct AmeBatchJobResult {
+    std::string jobName;
+    std::string outputPath;
+    bool presetCachePurged{false};
+    bool exportSucceeded{false};
+    bool containerValid{false};
+    size_t memoryDeltaBytes{0};
+};
+
+class IMockSweetPeaHost {
+public:
+    virtual ~IMockSweetPeaHost() = default;
+    virtual void* getSPBasicSuite() = 0;
+    virtual bool purgeAmePresetCache(const std::string& ameAppDataDir) = 0;
+};
+
+} // namespace openmedia::qa
+```
+
+---
+
+## 4. Cascading Merge & Validation Plan
+
+1. **US-4.1.0**: Units `unit-1..3` merge cascadingly into `feat/us-4.1.0-mediacore-host-integration-harness` $\to$ Gate G0..G-Review $\to$ `feat/module-4-integration-qa`.
+2. **US-4.2.0**: Units `unit-1..3` merge cascadingly into `feat/us-4.2.0-cpack-distribution-packaging` $\to$ Gate G0..G-Review $\to$ `feat/module-4-integration-qa`.
+3. **Module 4 Promotion**: Module Leader runs the complete integration, benchmark, and CPack packaging verification suite and merges `feat/module-4-integration-qa` into `main`.

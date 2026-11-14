@@ -1,290 +1,210 @@
-# User Story Specification Kit: US-3.1.0
+# User Story `US-3.1.0`: Exporter Registration, Parameter UI & Match Source Automation
 
-## Exporter Registration, Parameter UI & Match Source Automation
-
-| Metadata | Value |
-| :--- | :--- |
-| **Story ID** | `US-3.1.0` |
-| **Module ID** | `module-3-exporter-plugin` |
-| **Feature Name** | Exporter Registration, Parameter UI Hierarchy, Match Source & Subtitle Multiplexing |
-| **Target Binary** | `OpenMedia_Exporter.prm` |
-| **Story Score ($S_{\text{story}}$)** | **3.00 / 5.00** $\to$ **$K = 5$ Implementation Units** |
-| **Branch Convention** | `feat/us-3.1.0-exporter-registration-params-ui` |
-| **Unit Branches** | `feat/us-3.1.0/unit-N-<slug>` ($N \in [1..5]$) |
-| **PR Hierarchy** | Units $1..5 \to$ Story PR $\to$ `feat/module-3-exporter-plugin` |
+- **Module**: `module-3-exporter-plugin`
+- **Story Branch**: `feat/us-3.1.0-exporter-registration-params-ui`
+- **Field Profile**: `software` (`.agents/field-profile.json`)
+- **Story Decomposition Score ($S_{\text{story}}$)**: `3.00` $\to$ **`5` Parallel Implementation Units (`unit-1..5`)**
 
 ---
 
 ## 1. Spec Kit Specifications
 
-### 1.1 Narrative, Persona & Business Value
-- **Persona**: Content Creator and Colorist delivering finished video files for web streaming (YouTube, Vimeo) or archival distribution.
-- **Narrative**: In Adobe Premiere Pro and Adobe Media Encoder, configuring export formats requires an intuitive, responsive Export Settings panel. Without proper parameter registration, users cannot select modern codecs or have their sequence resolution, frame rate, and aspect ratio automatically matched. By implementing the `xSDKExport` lifecycle, constructing structured parameter groups (Video, Audio, Multiplexer, Subtitles), implementing one-click "Match Source" automation, and embedding multi-language subtitle tracks directly into MKV containers, OpenMedia delivers a native, first-class export experience identical to built-in H.264/HEVC presets.
-- **Business Value**: Eliminates user setup friction, guarantees export compatibility across diverse player ecosystems, and supports rich subtitle embedding out-of-the-box.
+### 1.1 User Story Narrative
+> **As a** video editor and colorist exporting master timelines from Adobe Premiere Pro and Adobe Media Encoder (or selecting a Sequence Preview File Format),  
+> **I want** `OpenMedia_Exporter.prm` to register multiple container formats (`Matroska MKV`, `WebM`, `AV1 MP4`) via `exSelStartup` using `exportReturn_IterateExporter`, build a versioned parameter UI via `PrSDKExportStdParamSuite` and `PrSDKExportParamSuite` (`SetParamsVersion()`), support one-click **Match Source** (`canMatchSource = kPrTrue` & `doConformToMatchParams`), embed Closed Captions via `PrSDKCaptioningSuite` (`canEmbedCaptions = kPrTrue`), and dynamically update visible controls in `exSelValidateParamChanged` with `rebuildAllParams = kPrTrue`,  
+> **So that** I can configure AV1/VP9/Opus/FLAC exports and `.epr` presets cleanly without UI control scrambling or manual parameter entry.
 
-#### 1.1.1 Explicit Preconditions
-1. Premiere Pro or Adobe Media Encoder loads `OpenMedia_Exporter.prm` from the MediaCore plugins directory during host startup.
-2. Host issues `exSelStartup` to probe export capabilities.
-3. User opens the Export Settings dialog (`Ctrl+M` / `Cmd+M`) on an active sequence.
+#### 1.1.1 Preconditions
+- `OpenMedia_Exporter.prm` / `.bundle` loaded from `MediaCore/7.0`.
+- Base contract `include/exporter/exporter_types.hpp` pre-seeded on `feat/us-3.1.0-exporter-registration-params-ui`.
 
-#### 1.1.2 Explicit Postconditions
-1. Format dropdown displays "OpenMedia MKV / WebM" alongside standard H.264/HEVC formats.
-2. Clicking "Match Source" auto-populates video width, height, frame rate, field order, and pixel aspect ratio from the active timeline.
-3. Modifying invalid parameter combinations (e.g. odd dimensions on 4:2:0 profiles) immediately triggers parameter validation feedback.
-4. Export presets can be saved as `.epr` files and queued into Adobe Media Encoder.
+#### 1.1.2 Postconditions
+- `exSelStartup` iterates across container formats by returning `exportReturn_IterateExporter` for indices `0..1` and `exportReturn_IterateExporterDone` on index `2`, exposing MKV, WebM, and AV1 MP4 in `File > Export > Media` and `Sequence Settings > Preview File Format`.
+- `exSelGenerateDefaultParams` calls `SetParamsVersion(kOpenMediaExporterParamsVersion)` and constructs Video, Audio, Multiplexer, and Captions parameter groups.
+- `exExporterInfoRec.canMatchSource = kPrTrue` automatically synchronizes width, height, frame rate, field order, and pixel aspect ratio when `doConformToMatchParams` is active.
+- `exExporterInfoRec.canEmbedCaptions = kPrTrue` extracts timeline caption tracks via `PrSDKCaptioningSuite` and multiplexes them into MKV/WebM subtitle streams.
+- `exSelValidateParamChanged` hides CPU-specific `libsvtav1` controls when `av1_nvenc` is selected (and vice versa), enforces 4:4:4 chroma restrictions, and sets `rebuildAllParams = kPrTrue`.
 
----
-
-### 1.2 Gherkin Acceptance Criteria
+### 1.2 Acceptance Criteria (Gherkin Scenarios)
 
 ```gherkin
-Feature: Exporter Registration and Parameter UI Management
+Feature: Multi-Format Exporter Iteration (exportReturn_IterateExporter), Versioned Parameter UI, Match Source, Captions, and Dynamic Validation
 
-  Scenario: Format registration in Export Settings
-    Given Premiere Pro initializes the Export Settings dialog
-    When the format list is populated via exSelStartup
-    Then "OpenMedia Matroska (.mkv)" and "OpenMedia WebM (.webm)" appear in the Format dropdown
-    And file extensions .mkv and .webm are correctly associated with the output filename.
+  Scenario: AC-1 — Multi-Container Registration via exportReturn_IterateExporter
+    Given Premiere Pro or Adobe Media Encoder invoking xSDKExport with selector exSelStartup
+    When ExporterEntry inspects the format iteration index
+    Then it registers "OpenMedia Matroska (.mkv)" on call 0 and returns exportReturn_IterateExporter
+    And registers "OpenMedia WebM (.webm)" on call 1 and returns exportReturn_IterateExporter
+    And registers "OpenMedia AV1 (.mp4)" on call 2 and returns exportReturn_IterateExporterDone
+    And sets canMatchSource = kPrTrue and canEmbedCaptions = kPrTrue on each format
 
-  Scenario: Match Source button interaction
-    Given a timeline with resolution 3840x2160, 23.976 fps, Square Pixels
-    When the user clicks the "Match Source" button in the Export UI
-    Then the exporter sets Width=3840, Height=2160, FrameRate=23.976, PAR=1.0
-    And locked parameter checkboxes indicate source synchronization.
+  Scenario: AC-2 — Parameter Tree Generation and Cache Version Invalidation (SetParamsVersion)
+    Given exSelGenerateDefaultParams and exSelPostProcessParams invoked for an export instance
+    When ExportParamBuilder initializes parameter groups via PrSDKExportStdParamSuite and PrSDKExportParamSuite
+    Then SetParamsVersion(1001) is called to invalidate stale Placeholder Preset.epr caches
+    And Video (Codec, Bit Depth 8/10/12-bit, Chroma 4:2:0/4:2:2/4:4:4, CRF Slider 0..63), Audio (Opus/FLAC), and Captions tabs are populated
 
-  Scenario: Dynamic validation on unsupported parameter changes
-    Given AV1 Main Profile selected with 4:2:0 subsampling
-    When the user enters an odd width of 1921 pixels
-    Then exSelValidateParamChanged snaps width to 1920 or prompts a warning
-    And prevents launching an invalid encoder state.
+  Scenario: AC-3 — Match Source Sequence Synchronization (doConformToMatchParams)
+    Given a timeline sequence at 3840x2160, 23.976 fps (24000/1001), Square Pixels (1.0)
+    When exSelPostProcessParams or exSelQueryOutputSettings executes with doConformToMatchParams = kPrTrue
+    Then MatchSourceEngine copies sequence Width=3840, Height=2160, FPS=24000/1001, and PAR=1/1 into the export parameters
 
-  Scenario: Multi-language subtitle track embedding
-    Given an MKV export job with English and Spanish SRT closed-caption tracks
-    When ClosedCaptionsSubtitleEmbedder processes subtitle streams during export initialization
-    Then the output MKV file embeds both subtitle tracks with RFC 5646 language tags ("en", "es").
+  Scenario: AC-4 — Timeline Closed Captions Extraction and MKV/WebM Embedding (PrSDKCaptioningSuite)
+    Given a sequence containing SRT / WebVTT closed caption tracks and canEmbedCaptions = kPrTrue
+    When CaptionEmbedder queries PrSDKCaptioningSuite during export setup
+    Then all caption cues, timestamps, and RFC 5646 language codes are formatted into subtitle tracks for ICoreMuxer
+
+  Scenario: AC-5 — Dynamic UI Rebuilding and Hardware Chroma Validation (exSelValidateParamChanged)
+    Given the user switches the Video Encoder dropdown from "SVT-AV1 (Software)" to "NVIDIA NVENC AV1 (Hardware)"
+    When exSelValidateParamChanged is triggered
+    Then DynamicUIValidator hides SVT-AV1 CPU preset controls, reveals NVENC tier controls, and sets rebuildAllParams = kPrTrue
+    And if 4:4:4 chroma is selected with a 4:2:0-only hardware encoder, auto-corrects chroma to 4:2:0 or switches to SVT-AV1 Profile 2
 ```
-
----
 
 ### 1.3 Test Cases & Traceability Matrix
 
-| Test ID | Category | Description | Covered Unit | Expected Result |
-| :--- | :--- | :--- | :--- | :--- |
-| `TC-3.1-01` | Host Protocol | `exSelStartup` format and capabilities query | `Unit-1` | Registers `.mkv` and `.webm` format descriptions and MIME types |
-| `TC-3.1-02` | UI Construction | Parameter hierarchy construction and serialization | `Unit-2` | All parameter groups (Video, Audio, Multiplex) rendered correctly |
-| `TC-3.1-03` | Automation | Match Source property synchronization | `Unit-3` | Sequence properties copied accurately with zero roundoff errors |
-| `TC-3.1-04` | Subtitles | Embedding SRT/VTT streams into MKV container | `Unit-4` | MKV tracks parsed cleanly by VLC/ffprobe with language metadata |
-| `TC-3.1-05` | UI Validation | Dynamic parameter constraint enforcement | `Unit-5` | Invalid dimension, bitrate, and GOP values rejected or auto-corrected |
+| Test Case ID | Mapped AC | Owning Unit | Test Level | Input Vector | Expected Result & Pass Threshold |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| `TC-3.1.1` | `AC-1` | `unit-1` | Unit | 3 consecutive `exSelStartup` invocations | Returns `exportReturn_IterateExporter` twice, then `exportReturn_IterateExporterDone` |
+| `TC-3.1.2` | `AC-2` | `unit-2` | Unit | `exSelGenerateDefaultParams` + `.epr` preset round-trip | `SetParamsVersion(1001)` recorded; all parameter groups verified |
+| `TC-3.1.3` | `AC-3` | `unit-3` | Unit | 4K 23.976fps & 1080p 59.94fps sequences with `doConformToMatchParams` | Exact width, height, rational FPS, and PAR matched |
+| `TC-3.1.4` | `AC-4` | `unit-4` | Unit | Mock `PrSDKCaptioningSuite` with Arabic & English captions | Subtitle streams created in `ICoreMuxer` with `ara` and `eng` tags |
+| `TC-3.1.5` | `AC-5` | `unit-5` | Unit | `exSelValidateParamChanged` switching `libsvtav1` $\leftrightarrow$ `av1_nvenc` | `rebuildAllParams == kPrTrue`; invalid 4:4:4 HW combo intercepted |
 
 ---
 
 ## 2. Technical Implementation Plan
 
-### 2.1 Domain Invariants, Data Models & Storage Schema
+### 2.1 Domain Invariants
+- **Multi-Format Iteration Protocol**:
+  - `exSelStartup` returns `exportReturn_IterateExporter` until all registered containers (`.mkv`, `.webm`, `.mp4`) are enumerated, then returns `exportReturn_IterateExporterDone`.
+- **Dynamic UI Rebuild Invariant**:
+  - Whenever parameter visibility (`hidden` flag) changes inside `exSelValidateParamChanged`, `exValidateParamChangedRec->rebuildAllParams = kPrTrue` MUST be set to prevent Premiere Pro / Media Encoder from scrambling parameter order.
 
-```cpp
-namespace OpenMedia::Exporter::UI {
-
-struct ExportParameters {
-    // Container
-    std::string containerFormat; // "mkv" or "webm"
-    
-    // Video
-    std::string videoCodec;      // "av1", "vp9"
-    int width;
-    int height;
-    prRational frameRate;
-    prRational pixelAspectRatio;
-    int crf;                     // 0 - 63 for SVT-AV1
-    int targetBitrateKbps;
-    int maxBitrateKbps;
-    int gopSize;
-    int encoderPreset;          // 0 (fast) - 13 (slowest)
-    
-    // Audio
-    std::string audioCodec;      // "opus", "flac"
-    int audioSampleRate;         // 48000, 44100
-    int audioBitrateKbps;        // 64 - 510
-    int audioChannels;           // 1, 2, 6, 8
-    
-    // Subtitles
-    std::vector<std::string> subtitleFilePaths;
-    std::vector<std::string> subtitleLanguages;
-};
-
-} // namespace OpenMedia::Exporter::UI
-```
-
-### 2.2 Sequence Diagram: Export Settings & Parameter Synchronization
+### 2.2 Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Host as Premiere Pro / AME
-    participant Dispatcher as ExporterEntryDispatcher (xSDKExport)
-    participant Builder as ExportParamBuilder
-    participant Matcher as MatchSourceEngine
-    participant Validator as DynamicUIValidator
+    participant Entry as ExporterEntry (unit-1)
+    participant Builder as ExportParamBuilder (unit-2)
+    participant Match as MatchSourceEngine (unit-3)
+    participant Captions as CaptionEmbedder (unit-4)
+    participant Validator as DynamicUIValidator (unit-5)
 
-    Host->>Dispatcher: exSelStartup
-    Dispatcher-->>Host: Register Formats (MKV, WebM)
-
-    Host->>Dispatcher: exSelGenerateDefaultParamData
-    Dispatcher->>Builder: BuildParameterTree()
-    Builder-->>Host: Video, Audio, Subtitle Parameter Descriptors
-
-    Host->>Dispatcher: exSelQueryOutputSettings (User clicked Match Source)
-    Dispatcher->>Matcher: FetchSequenceProperties(hostSequenceRef)
-    Matcher-->>Dispatcher: Width, Height, FPS, PAR
-    Dispatcher-->>Host: Synchronized Export Settings
-
-    Host->>Dispatcher: exSelValidateParamChanged(paramID, newValue)
-    Dispatcher->>Validator: ValidateParameter(paramID, newValue)
-    Validator-->>Dispatcher: AdjustedValue / Status
-    Dispatcher-->>Host: exportReturn_IterateExporterNoErr
+    Host->>Entry: exSelStartup (idx=0: MKV, idx=1: WebM, idx=2: MP4)
+    Entry-->>Host: exportReturn_IterateExporter -> exportReturn_IterateExporterDone
+    Host->>Entry: exSelGenerateDefaultParams
+    Entry->>Builder: SetParamsVersion(1001) & createParameterGroups()
+    Host->>Entry: exSelPostProcessParams(doConformToMatchParams=kPrTrue)
+    Entry->>Match: conformToSequenceSettings()
+    Host->>Entry: exSelValidateParamChanged(codecParamChanged)
+    Entry->>Validator: updateControlVisibility & set rebuildAllParams = kPrTrue
+    Host->>Entry: Query PrSDKCaptioningSuite
+    Entry->>Captions: extractTimelineCaptions()
 ```
 
 ---
 
-## 3. Expected Folder Architecture at the Project
+## 3. Expected Folder Architecture
 
-```
-plugins/exporter/
+```text
+AV1/
 ├── include/
-│   ├── OpenMedia_ExporterEntry.h
-│   ├── OpenMedia_ExportParamBuilder.h
-│   ├── OpenMedia_MatchSourceEngine.h
-│   ├── OpenMedia_SubtitleEmbedder.h
-│   └── OpenMedia_DynamicUIValidator.h
+│   └── exporter/
+│       ├── exporter_types.hpp                   # Base Contract (Pre-seeded)
+│       ├── exporter_entry.hpp                   # Owned by unit-1
+│       ├── export_param_builder.hpp             # Owned by unit-2
+│       ├── match_source_engine.hpp              # Owned by unit-3
+│       ├── caption_embedder.hpp                 # Owned by unit-4
+│       └── dynamic_ui_validator.hpp             # Owned by unit-5
 ├── src/
-│   ├── OpenMedia_ExporterEntry.cpp
-│   ├── OpenMedia_ExportParamBuilder.cpp
-│   ├── OpenMedia_MatchSourceEngine.cpp
-│   ├── OpenMedia_SubtitleEmbedder.cpp
-│   └── OpenMedia_DynamicUIValidator.cpp
+│   └── exporter/
+│       ├── exporter_entry.cpp                   # Owned by unit-1
+│       ├── export_param_builder.cpp             # Owned by unit-2
+│       ├── match_source_engine.cpp              # Owned by unit-3
+│       ├── caption_embedder.cpp                 # Owned by unit-4
+│       └── dynamic_ui_validator.cpp             # Owned by unit-5
+├── resources/
+│   └── exporter_resources.rc                    # Owned by unit-1
 └── tests/
-    ├── Test_ExporterEntry.cpp
-    ├── Test_ExportParamBuilder.cpp
-    ├── Test_MatchSourceEngine.cpp
-    ├── Test_SubtitleEmbedder.cpp
-    └── Test_DynamicUIValidator.cpp
+    └── exporter/
+        ├── test_exporter_entry.cpp              # Owned by unit-1
+        ├── test_export_param_builder.cpp        # Owned by unit-2
+        ├── test_match_source_engine.cpp         # Owned by unit-3
+        ├── test_caption_embedder.cpp            # Owned by unit-4
+        └── test_dynamic_ui_validator.cpp        # Owned by unit-5
 ```
 
 ---
 
 ## 4. Implementation Units in Detail & Specialist Agent Assignment
 
-### 4.1 Unit Sizing Decision Matrix & Score Calculation
+### 4.1 Story Decomposition Score ($S_{\text{story}}$) & Dynamic Unit Count ($K$)
+- **$D_1$ (35% Surface)**: `3` (5 exporter registration, UI parameter tree, Match Source, Captioning Suite, and validation components)
+- **$D_2$ (25% Volume)**: `3` (~950 LOC C++17)
+- **$D_3$ (20% Complexity)**: `3` (`exportReturn_IterateExporter` state machine, `SetParamsVersion`, `rebuildAllParams`, `PrSDKCaptioningSuite` iteration)
+- **$D_4$ (20% Boundaries)**: `3` (5 disjoint header/source/test groups)
+- **Calculated Score**: $S_{\text{story}} = 0.35(3) + 0.25(3) + 0.20(3) + 0.20(3) = \mathbf{3.00} \to \mathbf{5\text{ Parallel Units}}$
 
-$$S_{\text{story}} = 0.35 D_1 + 0.25 D_2 + 0.20 D_3 + 0.20 D_4$$
-- $D_1 = 4$ (Exporter entry, UI parameter builder, match source, captions embedder, dynamic validator)
-- $D_2 = 3$ (~1000 LOC across UI and export registration)
-- $D_3 = 3$ (Complex UI tree building, parameter change validation rules, .epr serialization)
-- $D_4 = 2$ (Exporter entry, UI builder, validator)
-$$S_{\text{story}} = (0.35 \times 4) + (0.25 \times 3) + (0.20 \times 3) + (0.20 \times 2) = 1.40 + 0.75 + 0.60 + 0.40 = 3.15 \implies K = 5$$
+### 4.2 Detailed Unit Specifications (`unit-1..5`)
 
-### 4.2 Dynamic $K$ Implementation Unit Specifications
+#### `unit-1` (`feat/us-3.1.0/unit-1-exporter-entry-iterate`)
+- **Deliverable Scope**: `ExporterEntry` implementing `xSDKExport` (`exSelStartup` multi-format iteration returning `exportReturn_IterateExporter` / `exportReturn_IterateExporterDone`, `exSelBeginInstance`, `exSelEndInstance`, `exSelQueryStillSequence`, and Sequence Preview File Format capabilities) plus `resources/exporter_resources.rc` and `tests/exporter/test_exporter_entry.cpp`.
+- **Owned Files**: `include/exporter/exporter_entry.hpp`, `src/exporter/exporter_entry.cpp`, `resources/exporter_resources.rc`, `tests/exporter/test_exporter_entry.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 1: Exporter Entry Dispatcher (`xSDKExport`)
-- **ID**: `unit-1`
-- **Branch**: `feat/us-3.1.0/unit-1-exporter-entry`
-- **Objective**: Core entry point routing all MediaCore exporter selectors (`exSelStartup`, `exSelBeginInstance`, `exSelEndInstance`, `exSelExport`).
-- **Files Owned**:
-  - `plugins/exporter/include/OpenMedia_ExporterEntry.h`
-  - `plugins/exporter/src/OpenMedia_ExporterEntry.cpp`
-  - `plugins/exporter/tests/Test_ExporterEntry.cpp`
-- **Verification**: `ctest -R Test_ExporterEntry` verifies selector routing and lifecycle dispatching under mock SDK parms.
+#### `unit-2` (`feat/us-3.1.0/unit-2-param-builder-versioning`)
+- **Deliverable Scope**: `ExportParamBuilder` implementing `exSelGenerateDefaultParams` and `exSelPostProcessParams` via `PrSDKExportStdParamSuite` and `PrSDKExportParamSuite`, invoking `SetParamsVersion(kOpenMediaExporterParamsVersion)`, and serializing `.epr` presets. Includes `tests/exporter/test_export_param_builder.cpp`.
+- **Owned Files**: `include/exporter/export_param_builder.hpp`, `src/exporter/export_param_builder.cpp`, `tests/exporter/test_export_param_builder.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 2: Export Parameter Hierarchy Builder
-- **ID**: `unit-2`
-- **Branch**: `feat/us-3.1.0/unit-2-param-builder`
-- **Objective**: Constructs parameter groups using Adobe Export Parameter Suite (`PrSDKExportParamSuite`), defining sliders, checkboxes, and comboboxes.
-- **Files Owned**:
-  - `plugins/exporter/include/OpenMedia_ExportParamBuilder.h`
-  - `plugins/exporter/src/OpenMedia_ExportParamBuilder.cpp`
-  - `plugins/exporter/tests/Test_ExportParamBuilder.cpp`
-- **Verification**: `ctest -R Test_ExportParamBuilder` checks parameter tree generation and `.epr` serialization compatibility.
+#### `unit-3` (`feat/us-3.1.0/unit-3-match-source-engine`)
+- **Deliverable Scope**: `MatchSourceEngine` handling `canMatchSource = kPrTrue`, inspecting `doConformToMatchParams`, and synchronizing sequence width, height, rational frame rate, field order, and pixel aspect ratio in `exSelPostProcessParams` and `exSelQueryOutputSettings`. Includes `tests/exporter/test_match_source_engine.cpp`.
+- **Owned Files**: `include/exporter/match_source_engine.hpp`, `src/exporter/match_source_engine.cpp`, `tests/exporter/test_match_source_engine.cpp`.
+- **Target Complexity**: $CC \le 5$, nesting $\le 2$.
 
-#### Unit 3: Match Source Automation Engine
-- **ID**: `unit-3`
-- **Branch**: `feat/us-3.1.0/unit-3-match-source-engine`
-- **Objective**: Extracts timeline dimensions, frame rates, color spaces, and pixel aspect ratios to automatically synchronize export settings.
-- **Files Owned**:
-  - `plugins/exporter/include/OpenMedia_MatchSourceEngine.h`
-  - `plugins/exporter/src/OpenMedia_MatchSourceEngine.cpp`
-  - `plugins/exporter/tests/Test_MatchSourceEngine.cpp`
-- **Verification**: `ctest -R Test_MatchSourceEngine` tests extraction of 720p, 1080p, 4K, 8K, and anamorphic sequence settings.
+#### `unit-4` (`feat/us-3.1.0/unit-4-captioning-suite-embedder`)
+- **Deliverable Scope**: `CaptionEmbedder` enabling `canEmbedCaptions = kPrTrue`, iterating timeline closed captions via Adobe's `PrSDKCaptioningSuite`, and formatting SRT / WebVTT / ASS subtitle packets for `ICoreMuxer`. Includes `tests/exporter/test_caption_embedder.cpp`.
+- **Owned Files**: `include/exporter/caption_embedder.hpp`, `src/exporter/caption_embedder.cpp`, `tests/exporter/test_caption_embedder.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 4: Closed Captions & Subtitle Track Embedder
-- **ID**: `unit-4`
-- **Branch**: `feat/us-3.1.0/unit-4-subtitle-embedder`
-- **Objective**: Multiplexes external subtitle files (SRT, ASS, VTT) into MKV container subtitle tracks with proper codec IDs and ISO-639 language codes.
-- **Files Owned**:
-  - `plugins/exporter/include/OpenMedia_SubtitleEmbedder.h`
-  - `plugins/exporter/src/OpenMedia_SubtitleEmbedder.cpp`
-  - `plugins/exporter/tests/Test_SubtitleEmbedder.cpp`
-- **Verification**: `ctest -R Test_SubtitleEmbedder` verifies subtitle packet generation and Matroska subtitle track header creation.
+#### `unit-5` (`feat/us-3.1.0/unit-5-dynamic-ui-validator`)
+- **Deliverable Scope**: `DynamicUIValidator` handling `exSelValidateParamChanged`, dynamically toggling hardware vs. software encoder parameter visibility with `rebuildAllParams = kPrTrue`, and validating resolution/chroma/profile combinations. Includes `tests/exporter/test_dynamic_ui_validator.cpp`.
+- **Owned Files**: `include/exporter/dynamic_ui_validator.hpp`, `src/exporter/dynamic_ui_validator.cpp`, `tests/exporter/test_dynamic_ui_validator.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 5: Dynamic Parameter Constraint Validator
-- **ID**: `unit-5`
-- **Branch**: `feat/us-3.1.0/unit-5-dynamic-ui-validator`
-- **Objective**: Enforces codec constraints (e.g., maximum dimensions, valid frame rates, CRF ranges) in `exSelValidateParamChanged`.
-- **Files Owned**:
-  - `plugins/exporter/include/OpenMedia_DynamicUIValidator.h`
-  - `plugins/exporter/src/OpenMedia_DynamicUIValidator.cpp`
-  - `plugins/exporter/tests/Test_DynamicUIValidator.cpp`
-- **Verification**: `ctest -R Test_DynamicUIValidator` validates boundary enforcement and rejection of invalid parameter combinations.
+### 4.3 Best-Fit Specialist Agents per Unit
 
-### 4.3 Specialist Agent Assignment
-
-| Unit | Subagent Type | Specialist Role |
-| :--- | :--- | :--- |
-| `unit-1` | `agency-minimal-change-engineer` | MediaCore Exporter SDK Protocol Specialist |
-| `unit-2` | `agency-frontend-developer` | Adobe Parameter UI Hierarchy Specialist |
-| `unit-3` | `agency-developer-tooling-engineer` | Sequence Metadata & Match Source Specialist |
-| `unit-4` | `agency-video-streaming-engineer` | Subtitle Multiplexing & Metadata Specialist |
-| `unit-5` | `agency-api-tester` | Boundary Validation & Constraint Specialist |
-
-### 4.4 Shared Base Contract & Seeding Plan
-- `ExportParameters` declared in `OpenMedia_ExporterTypes.h`.
-- Clear separation between UI parameter descriptors and low-level encoder initialization.
+| Unit ID | Branch Name | Primary Implementer Agent | Reviewing Council Agents | Mandatory Skills Enforced |
+| :--- | :--- | :--- | :--- | :--- |
+| `unit-1` | `feat/us-3.1.0/unit-1-exporter-entry-iterate` | `minimal-change-engineer` | `code-reviewer`, `security-architect` | `code-review-council`, `security-audit` |
+| `unit-2` | `feat/us-3.1.0/unit-2-param-builder-versioning` | `frontend-developer` | `code-reviewer`, `api-tester` | `code-review-council`, `cyclomatic-complexity` |
+| `unit-3` | `feat/us-3.1.0/unit-3-match-source-engine` | `developer-tooling-engineer` | `code-reviewer`, `test-automation-engineer` | `code-review-council`, `cyclomatic-complexity` |
+| `unit-4` | `feat/us-3.1.0/unit-4-captioning-suite-embedder` | `video-streaming-engineer` | `code-reviewer`, `security-architect` | `code-review-council`, `security-audit` |
+| `unit-5` | `feat/us-3.1.0/unit-5-dynamic-ui-validator` | `api-tester` | `code-reviewer`, `reality-checker` | `code-review-council`, `cyclomatic-complexity` |
+| **Patch** | `patch/us-3.1.0-<scope>` | `patch-implementer` | `code-reviewer-council-president` | Full Gate Verification |
 
 ---
 
-## 5. Security Gateway powered by `security-audit`
+## 5. Security Gateway (`security-audit`)
 
-### 5.1 Trust Boundaries & Actors
-- **Host Input**: Parameters passed from UI or `.epr` presets.
-- **Disk Output**: Exported output path provided by user.
-
-### 5.2 STRIDE Threat Matrix & ASVS 5.0 Controls
-
-| Threat Category | Scenario | Mitigation / ASVS 5.0 Control |
-| :--- | :--- | :--- |
-| **Tampering** | Directory traversal via malicious output filename (`../../etc/file`) | Strict path canonicalization and sanitization (ASVS V5.5.1) |
-| **Denial of Service** | Gigantic subtitle file injection triggering out-of-memory | Subtitle file size limit (10MB max) and streaming parser |
-| **Elevation of Privilege** | Format string vulnerability in preset label formatting | Safe string formatting using `std::string` or `fmt` library |
-
-### 5.3 Global Cryptographic, Jurisdictional & Data Protection Controls
-- Subtitle parsing strips any hidden EXIF or personal tracking metadata.
-
-### 5.4 Automated Security Verification Checklist
-- [x] Path traversal test confirms relative paths cannot escape the designated export directory.
-- [x] Preset parser fuzzing rejects malformed XML / JSON parameter files cleanly.
-
-### 5.5 Gate G2 Sign-Off Checklist
-- [x] Zero format string or buffer overrun vulnerabilities in parameter serialization.
-- [x] 100% boundary check coverage on user-supplied parameter inputs.
+| Threat ID | STRIDE | ASVS / CWE | Attack Scenario | Impact | Mitigation Control |
+| :--- | :---: | :---: | :--- | :---: | :--- |
+| `TM-3.1.1` | **T**ampering | CWE-22 | Directory traversal in output export path or `.epr` preset | High | Path canonicalization before opening output container |
+| `TM-3.1.2` | **D**enial of Service | CWE-400 | Malformed caption stream exceeding memory bounds | Medium | Cap caption cue text length at 4 KB per cue and 10 MB total per track |
+| `TM-3.1.3` | **T**ampering | CWE-20 | Deserializing out-of-range CRF/preset integers from corrupted `.epr` | Medium | Clamp all deserialized parameter values in `DynamicUIValidator` |
 
 ---
 
 ## 6. Validation Gates & Acceptance Sign-Off
 
-| Gate | Criterion | Verification Command | Pass Condition |
-| :--- | :--- | :--- | :--- |
-| **Gate G0** | Compilation & Formatter | `cmake --build --preset windows-x64-release` | 0 errors, 0 warnings |
-| **Gate G1** | Verification Coverage | `ctest -R Test_Export*` | 100% tests pass; coverage $\ge 90\%$ |
-| **Gate G2** | Security Audit | `scripts/security-audit-scan.sh --target exporter-ui` | 0 high/critical issues |
-| **Gate G-Complexity** | Cyclomatic Complexity | `python scripts/check-complexity.py plugins/exporter` | $CC \le 6$ target, $CC \le 10$ max ceiling |
-| **Gate G-Docs** | API Documentation | Doxygen comment check | 100% exporter UI functions documented |
-| **Gate G-Review** | Independent Council | GitHub PR Conversation Sign-Off | Approval comment from Code Reviewer Council |
+| Gate | Gate Name | Pass Criteria | Verification Evidence | Status |
+| :--- | :--- | :--- | :--- | :---: |
+| **Gate G0** | Build & Lint | 0 compiler warnings, `clang-format` clean | `cmake --build build` exit 0 | `[ ]` |
+| **Gate G1** | Tests & Traceability | `TC-3.1.1` .. `TC-3.1.5` pass 100% | `ctest -R test_exporter_entry|test_export_param_builder|test_match_source_engine|test_caption_embedder|test_dynamic_ui_validator` | `[ ]` |
+| **Gate G2** | Security Gateway | ASan clean, 0 parameter bounds vulnerabilities | `security-audit` report on PR | `[ ]` |
+| **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
+| **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 5 headers | Doxygen build clean | `[ ]` |
+| **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |

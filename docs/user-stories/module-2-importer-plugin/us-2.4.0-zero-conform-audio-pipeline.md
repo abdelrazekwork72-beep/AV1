@@ -1,277 +1,206 @@
-# User Story Specification Kit: US-2.4.0
+# User Story `US-2.4.0`: Zero-Conform 32-bit Planar Audio & Multi-Channel Pipeline
 
-## Zero-Conform Audio Extraction, Peak Waveform Generation & Multi-Channel Routing
-
-| Metadata | Value |
-| :--- | :--- |
-| **Story ID** | `US-2.4.0` |
-| **Module ID** | `module-2-importer-plugin` |
-| **Feature Name** | Zero-Conform Audio Decoding, Peak Waveform Synthesis & 32-Channel Layout Routing |
-| **Target Binary** | `OpenMedia_Importer.prm` |
-| **Story Score ($S_{\text{story}}$)** | **2.80 / 5.00** $\to$ **$K = 5$ Implementation Units** |
-| **Branch Convention** | `feat/us-2.4.0-zero-conform-audio-pipeline` |
-| **Unit Branches** | `feat/us-2.4.0/unit-N-<slug>` ($N \in [1..5]$) |
-| **PR Hierarchy** | Units $1..5 \to$ Story PR $\to$ `feat/module-2-importer-plugin` |
+- **Module**: `module-2-importer-plugin`
+- **Story Branch**: `feat/us-2.4.0-zero-conform-audio-pipeline`
+- **Field Profile**: `software` (`.agents/field-profile.json`)
+- **Story Decomposition Score ($S_{\text{story}}$)**: `2.80` $\to$ **`5` Parallel Implementation Units (`unit-1..5`)**
 
 ---
 
 ## 1. Spec Kit Specifications
 
-### 1.1 Narrative, Persona & Business Value
-- **Persona**: Audio Engineer and Video Editor working with high-channel count gameplay captures (OBS Studio / MKV) containing Opus / FLAC audio tracks.
-- **Narrative**: Traditionally, importing MKV/WebM files with Opus or FLAC audio into editing suites forces the application to "conform" the audio—decoding entire hour-long tracks to 32-bit uncompressed `.cfa` and `.pek` cache files on disk. This blocks immediate timeline playback, consumes dozens of gigabytes of SSD space, and wears down drive health. By intercepting `imGetInfo8` to signal `avoidAudioConform = kPrTrue` with `kRandomAccessImport`, extracting 32-bit floating point planar PCM on the fly, responding to `imGetPeakAudio` with instantaneous peak waveform pyramids, and routing up to 32 discrete surround/spatial channels, OpenMedia enables instant drag-and-drop audio playback and visible waveforms with zero disk conforming delay.
-- **Business Value**: Eliminates 100% of the conforming wait time on MKV imports, saving video editors 5–15 minutes per imported asset and preserving gigabytes of local storage.
+### 1.1 User Story Narrative
+> **As an** audio engineer and video editor importing multi-track MKV/WebM files containing Opus, FLAC, Vorbis, or PCM audio into Adobe Premiere Pro,  
+> **I want** the importer to bypass Premiere's slow `.cfa`/`.pek` disk conforming (`imImportInfoRec.avoidAudioConform = kPrTrue` in `imInit` paired with `imFileInfoRec8.accessModes |= kRandomAccessImport` in `imGetInfo8`), deliver 32-bit floating point uninterleaved (planar) audio via `imImportAudio7` (`float* audio[channels]`, $0\text{ dB} = \pm 1.0$), generate instant waveform peaks via `imGetPeakAudio` (`canProvidePeakAudio = kPrTrue`), and map up to 32 surround/discrete channels via `imGetAudioChannelLayout`,  
+> **So that** multi-hour recordings play immediately on the timeline with visible waveforms and zero gigabytes wasted on `.cfa` cache files.
 
-#### 1.1.1 Explicit Preconditions
-1. Container demuxing engine identifies one or more audio streams encoded in Opus, FLAC, Vorbis, or PCM.
-2. Adobe Premiere Pro initiates `imGetInfo8`, `imImportAudio`, or `imGetPeakAudio` selectors.
-3. MediaCore Host supports 32-bit floating point planar audio buffer exchange.
+#### 1.1.1 Preconditions
+- `US-2.1.0` demuxer enumerates audio streams and `include/importer/importer_types.hpp` is pre-seeded.
+- Host exposes `PrSDKAudioSuite` via SweetPea.
 
-#### 1.1.2 Explicit Postconditions
-1. Premiere Pro does not write `.cfa` or `.pek` auxiliary files to the Media Cache directory upon asset import.
-2. Timeline audio waveforms render within $< 100\,\text{ms}$ of timeline drop via `imGetPeakAudio`.
-3. Multi-channel audio (up to 32 discrete audio channels) maps accurately to Premiere timeline tracks without channel swizzling or phase cancellation.
-4. Audio-video synchronization remains strictly jitter-free ($\le 1\,\text{sample}$ clock skew) across 4-hour playback sessions.
+#### 1.1.2 Postconditions
+- `imInit` sets `imImportInfoRec.avoidAudioConform = kPrTrue` and `imImportInfoRec.canProvidePeakAudio = kPrTrue`; `imGetInfo8` sets `imFileInfoRec8.accessModes |= kRandomAccessImport`.
+- Premiere Pro generates zero `.cfa` or `.pek` conform files on disk upon importing Opus/FLAC/Vorbis media.
+- `imImportAudio7` populates `float* audio[channels]` with 32-bit float planar samples normalized to $[-1.0, +1.0]$.
+- `imGetPeakAudio` synthesizes min/max waveform peaks directly in memory in $< 50\,\text{ms}$.
+- `imGetAudioChannelLayout` maps Mono, Stereo, 5.1, 7.1, and up to 32 channels to `PrAudioChannelLabel` constants.
 
----
-
-### 1.2 Gherkin Acceptance Criteria
+### 1.2 Acceptance Criteria (Gherkin Scenarios)
 
 ```gherkin
-Feature: Zero-Conform Audio Decoding and Peak Waveform Generation
+Feature: Zero-Conform 32-Bit Float Planar Audio (imImportAudio7), Instant Waveform Peaks (imGetPeakAudio), and 32-Channel Routing
 
-  Scenario: Instant import without audio conforming
-    Given an MKV file with 48kHz Opus stereo audio
-    When the user drops the file into Premiere Pro Project Panel
-    Then the plugin flags avoidAudioConform = kPrTrue in imGetInfo8
-    And no .cfa or .pek cache files are generated on disk
-    And the audio is immediately playable on the timeline.
+  Scenario: AC-1 — 32-Bit Floating Point Planar Audio Delivery via imImportAudio7
+    Given an imported MKV or WebM file containing Opus, FLAC, Vorbis, or 16-bit PCM audio
+    When Premiere Pro invokes selector imImportAudio7 with imImportAudioRec7
+    Then AudioExtractor decodes the requested sample range into uninterleaved float* audio[channels] buffers
+    And 16-bit integer samples follow Sample_32bitFloat[n] = Sample_16bitInt[n] / 32767.0 where 0 dB = +/- 1.0
 
-  Scenario: Direct peak waveform calculation
-    Given Premiere Pro requests audio waveform display for an imported 60-minute video
-    When imGetPeakAudio is invoked with sample range and decimation level
-    Then PeakWaveformGenerator calculates min and max sample amplitudes directly from demuxed packets
-    And returns peak pyramids to Premiere in under 50ms per timeline view quadrant.
+  Scenario: AC-2 — Zero-Conform Protocol Enforcement (imInit + imGetInfo8)
+    Given Premiere Pro initializing the plugin and probing a compressed Opus/FLAC audio stream
+    When imInit and imGetInfo8 are executed
+    Then AudioConformBypass sets imImportInfoRec.avoidAudioConform = kPrTrue and canProvidePeakAudio = kPrTrue in imInit
+    And sets imFileInfoRec8.accessModes |= kRandomAccessImport in imGetInfo8
+    And prevents Premiere Pro from writing .cfa or .pek conform files to disk
 
-  Scenario: Complex multi-channel layout routing
-    Given an OBS MKV recording with 6 separate audio tracks (Microphone, Game, Discord, Music)
-    When the file is placed on a multi-track sequence
-    Then MultiChannelLayoutRouter maps discrete audio channels to independent timeline tracks
-    And maintains exact 32-bit float planar sample boundaries without crosstalk.
+  Scenario: AC-3 — Direct In-Memory Waveform Peak Generation (imGetPeakAudio)
+    Given Premiere Pro rendering audio waveforms on the timeline
+    When selector imGetPeakAudio is invoked with sample range and decimation factor
+    Then PeakWaveformGenerator computes min/max amplitude arrays directly from cached/demuxed audio packets in < 50ms
 
-  Scenario: Sample rate conversion to sequence clock
-    Given a 44.1kHz FLAC audio track placed into a 48.0kHz Premiere Pro sequence
-    When imImportAudio requests audio buffers at 48.0kHz
-    Then AudioResampleConverter uses libswresample to perform sinc-interpolated resampling
-    And output signal maintains SNR > 96dB with zero audible aliasing or crackling.
+  Scenario: AC-4 — Surround and Multi-Channel Layout Mapping (imGetAudioChannelLayout)
+    Given an audio stream with Mono, Stereo, 5.1 Surround, or up to 32 discrete channels in Premiere CC
+    When selector imGetAudioChannelLayout is invoked
+    Then MultiChannelRouter maps FFmpeg channel masks to exact PrAudioChannelLabel identifiers without channel swapping
+
+  Scenario: AC-5 — High-Precision Sinc Resampling via libswresample
+    Given a 44.1kHz or 96kHz audio stream placed on a 48kHz Premiere Pro sequence
+    When imImportAudio7 requests samples at the sequence sample rate
+    Then AudioResampler converts sample rates seamlessly with SNR > 96 dB and zero phase drift
 ```
-
----
 
 ### 1.3 Test Cases & Traceability Matrix
 
-| Test ID | Category | Description | Covered Unit | Expected Result |
-| :--- | :--- | :--- | :--- | :--- |
-| `TC-2.4-01` | Audio Decoding | Opus 48kHz to 32-bit float planar PCM | `Unit-1` | Lossless floating point conversion with full dynamic range $[-1.0, 1.0]$ |
-| `TC-2.4-02` | Host Protocol | `avoidAudioConform` flag verification in `imGetInfo8` | `Unit-2` | Host sets conform status to bypassed; zero `.cfa` files created |
-| `TC-2.4-03` | Waveforms | Peak audio pyramid generation accuracy | `Unit-3` | Min/max values match baseline uncompressed PCM analysis within $0.001\%$ |
-| `TC-2.4-04` | Channel Matrix | 5.1 surround to 6-channel planar mapping | `Unit-4` | Correct order: L, R, C, LFE, Ls, Rs; no channel swapping |
-| `TC-2.4-05` | Resampling | Resampling 44.1kHz / 96kHz to 48kHz timeline clock | `Unit-5` | Zero phase drift; sample count aligns with sequence frame rate |
+| Test Case ID | Mapped AC | Owning Unit | Test Level | Input Vector | Expected Result & Pass Threshold |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| `TC-2.4.1` | `AC-1` | `unit-1` | Unit | `imImportAudio7` request on Opus/FLAC/PCM16 stream | Planar `float* audio[channels]` populated; $\pm 32767 \to \pm 1.0\text{f}$ |
+| `TC-2.4.2` | `AC-2` | `unit-2` | Unit | `imInit` + `imGetInfo8` structs inspection | `avoidAudioConform == kPrTrue` in `imInit`; `kRandomAccessImport` set in `imGetInfo8` |
+| `TC-2.4.3` | `AC-3` | `unit-3` | Unit | `imGetPeakAudio` on 60-min audio stream | Accurate min/max peak pyramid returned in $< 50\,\text{ms}$ |
+| `TC-2.4.4` | `AC-4` | `unit-4` | Unit | `imGetAudioChannelLayout` for 2ch, 6ch (5.1), and 32ch | Exact `PrAudioChannelLabel` mapping (`kPrAudioChannelLabel_FrontLeft`, etc.) |
+| `TC-2.4.5` | `AC-5` | `unit-5` | Unit | 44.1kHz $\to$ 48kHz sine wave resampling | SNR $> 96\text{ dB}$; 0 sample count drift across 4 hours |
 
 ---
 
 ## 2. Technical Implementation Plan
 
-### 2.1 Domain Invariants, Data Models & Storage Schema
-
+### 2.1 Domain Invariants & Mathematical Formulas
+- **32-Bit Float Uninterleaved Conversion Formula**:
+$$\text{Sample}_{\text{32bitFloat}}[n] = \frac{\text{Sample}_{\text{16bitInt}}[n]}{32767.0}, \quad 0\text{ dB} \equiv \pm 1.0\text{f}$$
+- **Zero-Conform Dual-Selector Invariant**:
 ```cpp
-namespace OpenMedia::Importer::Audio {
+// In imInit (imImportInfoRec):
+importInfoRec->avoidAudioConform   = kPrTrue;
+importInfoRec->canProvidePeakAudio = kPrTrue;
 
-struct AudioFormatDescriptor {
-    AVCodecID codecId;
-    int sampleRate;
-    int channels;
-    uint64_t channelLayout;
-    AVSampleFormat sampleFormat;
-    bool isPlanar;
-};
-
-struct PeakPyramidLevel {
-    uint32_t decimationFactor; // e.g., 256, 1024, 4096
-    std::vector<float> minPeaks;
-    std::vector<float> maxPeaks;
-};
-
-struct AudioPacketChunk {
-    int64_t startSample;
-    int64_t sampleCount;
-    std::vector<float*> planarBuffers; // [channel][sample]
-};
-
-} // namespace OpenMedia::Importer::Audio
+// In imGetInfo8 (imFileInfoRec8):
+fileInfoRec8->accessModes |= kRandomAccessImport;
 ```
 
-### 2.2 Activity Diagram: Audio Import & Waveform Request Cycle
+### 2.2 Activity Diagram
 
 ```mermaid
 flowchart TD
-    A[Premiere Pro calls imGetInfo8] --> B[Plugin queries AudioFormatDescriptor]
-    B --> C[Set avoidAudioConform = kPrTrue]
-    C --> D[Set accessModes |= kRandomAccessImport]
-    D --> E[Premiere Pro draws timeline track]
-    E --> F{Host calls selector?}
-    F -->|imGetPeakAudio| G[PeakWaveformGenerator: direct packet min/max analysis]
-    G --> H[Return peak buffer to Host without disk I/O]
-    F -->|imImportAudio| I[ZeroConformAudioExtractor: decode Opus/FLAC frame]
-    I --> J{Sample rate == Sequence rate?}
-    J -->|No| K[AudioResampleConverter: libswresample]
-    J -->|Yes| L[MultiChannelLayoutRouter: planar routing]
-    K --> L
-    L --> M[Write to Host 32-bit float audio buffer]
+    Init["Host Calls imInit"] --> SetInitFlags["Set imImportInfoRec.avoidAudioConform = kPrTrue & canProvidePeakAudio = kPrTrue"]
+    SetInitFlags --> Info["Host Calls imGetInfo8"]
+    Info --> SetInfoFlags["Set imFileInfoRec8.accessModes |= kRandomAccessImport"]
+    SetInfoFlags --> Layout["Host Calls imGetAudioChannelLayout"]
+    Layout --> MapChannels["MultiChannelRouter: Map 1..32 Channels to PrAudioChannelLabel"]
+    MapChannels --> Selector{"Host Timeline Audio Selector?"}
+    Selector -- imGetPeakAudio --> GenPeaks["PeakWaveformGenerator: Compute Min/Max Peaks in Memory (< 50ms)"]
+    Selector -- imImportAudio7 --> DecodeAudio["AudioExtractor: Decode Packet to 32-Bit Float Planar"]
+    DecodeAudio --> CheckRate{"Rate Match?"}
+    CheckRate -- No --> Resample["AudioResampler: libswresample to Target Rate"]
+    CheckRate -- Yes --> WriteBuffers["Populate float* audio[channels] in imImportAudioRec7"]
+    Resample --> WriteBuffers
 ```
 
 ---
 
-## 3. Expected Folder Architecture at the Project
+## 3. Expected Folder Architecture
 
-```
-plugins/importer/
+```text
+AV1/
 ├── include/
-│   ├── OpenMedia_AudioExtractor.h
-│   ├── OpenMedia_AudioConformBypass.h
-│   ├── OpenMedia_PeakWaveformGenerator.h
-│   ├── OpenMedia_MultiChannelRouter.h
-│   └── OpenMedia_AudioResampler.h
+│   └── importer/
+│       ├── audio_extractor.hpp                  # Owned by unit-1
+│       ├── audio_conform_bypass.hpp             # Owned by unit-2
+│       ├── peak_waveform_generator.hpp          # Owned by unit-3
+│       ├── multi_channel_router.hpp             # Owned by unit-4
+│       └── audio_resampler.hpp                  # Owned by unit-5
 ├── src/
-│   ├── OpenMedia_AudioExtractor.cpp
-│   ├── OpenMedia_AudioConformBypass.cpp
-│   ├── OpenMedia_PeakWaveformGenerator.cpp
-│   ├── OpenMedia_MultiChannelRouter.cpp
-│   └── OpenMedia_AudioResampler.cpp
+│   └── importer/
+│       ├── audio_extractor.cpp                  # Owned by unit-1
+│       ├── audio_conform_bypass.cpp             # Owned by unit-2
+│       ├── peak_waveform_generator.cpp          # Owned by unit-3
+│       ├── multi_channel_router.cpp             # Owned by unit-4
+│       └── audio_resampler.cpp                  # Owned by unit-5
 └── tests/
-    ├── Test_AudioExtractor.cpp
-    ├── Test_AudioConformBypass.cpp
-    ├── Test_PeakWaveformGenerator.cpp
-    ├── Test_MultiChannelRouter.cpp
-    └── Test_AudioResampler.cpp
+    └── importer/
+        ├── test_audio_extractor.cpp             # Owned by unit-1
+        ├── test_audio_conform_bypass.cpp        # Owned by unit-2
+        ├── test_peak_waveform_generator.cpp     # Owned by unit-3
+        ├── test_multi_channel_router.cpp        # Owned by unit-4
+        └── test_audio_resampler.cpp             # Owned by unit-5
 ```
 
 ---
 
 ## 4. Implementation Units in Detail & Specialist Agent Assignment
 
-### 4.1 Unit Sizing Decision Matrix & Score Calculation
+### 4.1 Story Decomposition Score ($S_{\text{story}}$) & Dynamic Unit Count ($K$)
+- **$D_1$ (35% Surface)**: `3` (`imImportAudio7`, `avoidAudioConform`/`kRandomAccessImport`, `imGetPeakAudio`, `imGetAudioChannelLayout`, `libswresample`)
+- **$D_2$ (25% Volume)**: `3` (~850 LOC C++17)
+- **$D_3$ (20% Complexity)**: `2` (Planar float sample conversion, peak decimation pyramids, 32-channel mapping)
+- **$D_4$ (20% Boundaries)**: `3` (5 disjoint header/source/test triplets)
+- **Calculated Score**: $S_{\text{story}} = 0.35(3) + 0.25(3) + 0.20(2) + 0.20(3) = 1.05 + 0.75 + 0.40 + 0.60 = \mathbf{2.80} \to \mathbf{5\text{ Parallel Units}}$
 
-$$S_{\text{story}} = 0.35 D_1 + 0.25 D_2 + 0.20 D_3 + 0.20 D_4$$
-- $D_1 = 3$ (Audio decoders, peak wave, channel mapping)
-- $D_2 = 3$ (~950 LOC across audio subsystem)
-- $D_3 = 3$ (Sample rate conversion, floating point math, channel layout matrix)
-- $D_4 = 2$ (Audio decoder, peak extractor, resampler)
-$$S_{\text{story}} = (0.35 \times 3) + (0.25 \times 3) + (0.20 \times 3) + (0.20 \times 2) = 1.05 + 0.75 + 0.60 + 0.40 = 2.80 \implies K = 5$$
+### 4.2 Detailed Unit Specifications (`unit-1..5`)
 
-### 4.2 Dynamic $K$ Implementation Unit Specifications
+#### `unit-1` (`feat/us-2.4.0/unit-1-audio-import7-extractor`)
+- **Deliverable Scope**: `AudioExtractor` implementing selector `imImportAudio7` (`imImportAudioRec7`). Decodes Opus, FLAC, Vorbis, and PCM packets into uninterleaved 32-bit float planar arrays (`float* audio[channels]`) using `libswresample` and `PrSDKAudioSuite`. Includes `tests/importer/test_audio_extractor.cpp`.
+- **Owned Files**: `include/importer/audio_extractor.hpp`, `src/importer/audio_extractor.cpp`, `tests/importer/test_audio_extractor.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 1: Zero-Conform Planar Audio Extractor
-- **ID**: `unit-1`
-- **Branch**: `feat/us-2.4.0/unit-1-audio-extractor`
-- **Objective**: Decoding pipeline for Opus, FLAC, Vorbis, and PCM streams yielding IEEE 754 32-bit planar floating-point buffers.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_AudioExtractor.h`
-  - `plugins/importer/src/OpenMedia_AudioExtractor.cpp`
-  - `plugins/importer/tests/Test_AudioExtractor.cpp`
-- **Verification**: `ctest -R Test_AudioExtractor` verifies Opus/FLAC frame decoding into planar float arrays with 0 sample clipping.
+#### `unit-2` (`feat/us-2.4.0/unit-2-audio-conform-bypass`)
+- **Deliverable Scope**: `AudioConformBypass` configuring `imImportInfoRec.avoidAudioConform = kPrTrue` and `canProvidePeakAudio = kPrTrue` during `imInit`, and `imFileInfoRec8.accessModes |= kRandomAccessImport` during `imGetInfo8`, plus random-access sample seek indexing. Includes `tests/importer/test_audio_conform_bypass.cpp`.
+- **Owned Files**: `include/importer/audio_conform_bypass.hpp`, `src/importer/audio_conform_bypass.cpp`, `tests/importer/test_audio_conform_bypass.cpp`.
+- **Target Complexity**: $CC \le 5$, nesting $\le 2$.
 
-#### Unit 2: Audio Conform Bypass Selector Protocol
-- **ID**: `unit-2`
-- **Branch**: `feat/us-2.4.0/unit-2-audio-conform-bypass`
-- **Objective**: Implements MediaCore `imGetInfo8` / `imGetIndAudioInfo` flags `avoidAudioConform` and random access audio flags.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_AudioConformBypass.h`
-  - `plugins/importer/src/OpenMedia_AudioConformBypass.cpp`
-  - `plugins/importer/tests/Test_AudioConformBypass.cpp`
-- **Verification**: `ctest -R Test_AudioConformBypass` mocks host `imGetInfo8` struct and verifies correct bitmask flags are set.
+#### `unit-3` (`feat/us-2.4.0/unit-3-peak-waveform-generator`)
+- **Deliverable Scope**: `PeakWaveformGenerator` implementing selector `imGetPeakAudio` (`imPeakAudioRec`). Computes multi-resolution min/max waveform peaks directly in memory in $< 50\,\text{ms}$. Includes `tests/importer/test_peak_waveform_generator.cpp`.
+- **Owned Files**: `include/importer/peak_waveform_generator.hpp`, `src/importer/peak_waveform_generator.cpp`, `tests/importer/test_peak_waveform_generator.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 3: Instantaneous Peak Waveform Generator
-- **ID**: `unit-3`
-- **Branch**: `feat/us-2.4.0/unit-3-peak-waveform-generator`
-- **Objective**: Handles `imGetPeakAudio` selector, synthesizing multi-resolution peak pyramids directly from demuxed packets in memory.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_PeakWaveformGenerator.h`
-  - `plugins/importer/src/OpenMedia_PeakWaveformGenerator.cpp`
-  - `plugins/importer/tests/Test_PeakWaveformGenerator.cpp`
-- **Verification**: `ctest -R Test_PeakWaveformGenerator` verifies peak min/max bounds and timing performance $< 50\,\text{ms}$.
+#### `unit-4` (`feat/us-2.4.0/unit-4-multi-channel-router`)
+- **Deliverable Scope**: `MultiChannelRouter` implementing selector `imGetAudioChannelLayout`. Maps Mono, Stereo, 5.1, 7.1, and up to 32 discrete channels to Adobe `PrAudioChannelLabel` constants. Includes `tests/importer/test_multi_channel_router.cpp`.
+- **Owned Files**: `include/importer/multi_channel_router.hpp`, `src/importer/multi_channel_router.cpp`, `tests/importer/test_multi_channel_router.cpp`.
+- **Target Complexity**: $CC \le 5$, nesting $\le 2$.
 
-#### Unit 4: Multi-Channel Layout Matrix Router
-- **ID**: `unit-4`
-- **Branch**: `feat/us-2.4.0/unit-4-multi-channel-router`
-- **Objective**: Channel routing and remapping engine supporting standard configurations (Mono, Stereo, 5.1, 7.1) and up to 32 discrete tracks.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_MultiChannelRouter.h`
-  - `plugins/importer/src/OpenMedia_MultiChannelRouter.cpp`
-  - `plugins/importer/tests/Test_MultiChannelRouter.cpp`
-- **Verification**: `ctest -R Test_MultiChannelRouter` verifies 5.1/7.1 channel matrix conversion and discrete channel mapping.
+#### `unit-5` (`feat/us-2.4.0/unit-5-audio-resampler`)
+- **Deliverable Scope**: `AudioResampler` wrapping `libswresample` polyphase sinc resampling for arbitrary source sample rates ($44.1\text{ kHz}, 88.2\text{ kHz}, 96\text{ kHz} \to 48\text{ kHz}$) with zero clock skew. Includes `tests/importer/test_audio_resampler.cpp`.
+- **Owned Files**: `include/importer/audio_resampler.hpp`, `src/importer/audio_resampler.cpp`, `tests/importer/test_audio_resampler.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 5: High-Precision Audio Resampler (libswresample)
-- **ID**: `unit-5`
-- **Branch**: `feat/us-2.4.0/unit-5-audio-resampler`
-- **Objective**: High-fidelity polyphase sinc audio resampler using FFmpeg `libswresample` to reconcile source and timeline clock mismatches.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_AudioResampler.h`
-  - `plugins/importer/src/OpenMedia_AudioResampler.cpp`
-  - `plugins/importer/tests/Test_AudioResampler.cpp`
-- **Verification**: `ctest -R Test_AudioResampler` tests 44.1kHz $\to$ 48kHz conversion, measuring SNR and frequency response.
+### 4.3 Best-Fit Specialist Agents per Unit
 
-### 4.3 Specialist Agent Assignment
-
-| Unit | Subagent Type | Specialist Role |
-| :--- | :--- | :--- |
-| `unit-1` | `agency-voice-ai-integration-engineer` | Audio Codec & DSP Specialist |
-| `unit-2` | `agency-minimal-change-engineer` | MediaCore SDK Protocol Specialist |
-| `unit-3` | `agency-data-visualization-engineer` | Waveform Pyramid & Decimation Specialist |
-| `unit-4` | `agency-backend-architect` | Multi-Channel Matrix & DSP Architect |
-| `unit-5` | `agency-audio-processing-specialist` | Audio Resampling & libswresample Specialist |
-
-### 4.4 Shared Base Contract & Seeding Plan
-- `AudioFormatDescriptor` and `PeakPyramidLevel` declared in `OpenMedia_AudioTypes.h`.
-- Resampler and Extractor expose clean C++ interfaces with no direct Premiere SDK dependencies.
+| Unit ID | Branch Name | Primary Implementer Agent | Reviewing Council Agents | Mandatory Skills Enforced |
+| :--- | :--- | :--- | :--- | :--- |
+| `unit-1` | `feat/us-2.4.0/unit-1-audio-import7-extractor` | `audio-processing-specialist` | `code-reviewer`, `security-architect` | `code-review-council`, `security-audit` |
+| `unit-2` | `feat/us-2.4.0/unit-2-audio-conform-bypass` | `minimal-change-engineer` | `code-reviewer`, `api-tester` | `code-review-council`, `cyclomatic-complexity` |
+| `unit-3` | `feat/us-2.4.0/unit-3-peak-waveform-generator` | `data-visualization-engineer` | `code-reviewer`, `performance-benchmarker` | `code-review-council`, `cyclomatic-complexity` |
+| `unit-4` | `feat/us-2.4.0/unit-4-multi-channel-router` | `backend-architect` | `code-reviewer`, `test-automation-engineer` | `code-review-council`, `security-audit` |
+| `unit-5` | `feat/us-2.4.0/unit-5-audio-resampler` | `audio-processing-specialist` | `code-reviewer`, `reality-checker` | `code-review-council`, `cyclomatic-complexity` |
+| **Patch** | `patch/us-2.4.0-<scope>` | `patch-implementer` | `code-reviewer-council-president` | Full Gate Verification |
 
 ---
 
-## 5. Security Gateway powered by `security-audit`
+## 5. Security Gateway (`security-audit`)
 
-### 5.1 Trust Boundaries & Actors
-- **Untrusted Input**: Corrupted audio packets with invalid sample rates (e.g., negative sample rates or divide-by-zero channels).
-- **Audio Output**: Direct memory buffers provided by Premiere Pro host.
-
-### 5.2 STRIDE Threat Matrix & ASVS 5.0 Controls
-
-| Threat Category | Scenario | Mitigation / ASVS 5.0 Control |
-| :--- | :--- | :--- |
-| **Denial of Service** | Audio packet claims $10^9$ samples causing heap exhaustion | Strict sample batch chunk ceiling ($65,536$ samples max per call) |
-| **Tampering** | Integer overflow in byte size calculation for multi-channel buffers | Safe math with `std::overflow_error` guard (ASVS V5.1.1) |
-| **Information Disclosure** | Audio buffer underflow reading adjacent heap memory | Buffer zeroing and strict clamping to decoded sample count |
-
-### 5.3 Global Cryptographic, Jurisdictional & Data Protection Controls
-- Audio stream metadata sanitization guarantees zero leakage of embedded personal identifiers or recording device metadata.
-
-### 5.4 Automated Security Verification Checklist
-- [x] Fuzz testing with corrupted Opus/FLAC packets triggers clean error return without segfault.
-- [x] Buffer bounds checking verified across all 32 channels.
-- [x] Arithmetic overflow check on `sampleCount * channels * sizeof(float)`.
-
-### 5.5 Gate G2 Sign-Off Checklist
-- [x] No unsafe raw pointer arithmetic in audio buffer indexing.
-- [x] Zero memory leaks verified by Valgrind / ASAN on audio stream teardown.
+| Threat ID | STRIDE | ASVS / CWE | Attack Scenario | Impact | Mitigation Control |
+| :--- | :---: | :---: | :--- | :---: | :--- |
+| `TM-2.4.1` | **D**enial of Service | CWE-400 | Corrupted audio header requesting $10^9$ samples per `imImportAudio7` call | High | Clamp maximum batch request to $65,536$ samples per invocation |
+| `TM-2.4.2` | **T**ampering | CWE-190 | Integer overflow in `channels * numSamples * sizeof(float)` | High | Checked `size_t` multiplication with explicit channel bound ($1 \le \text{channels} \le 32$) |
+| `TM-2.4.3` | **I**nformation Disclosure | CWE-125 | Audio buffer underrun at EOF reading uninitialized heap | Medium | Zero-fill trailing samples with `0.0f` silence when decoded count $<$ requested count |
 
 ---
 
 ## 6. Validation Gates & Acceptance Sign-Off
 
-| Gate | Criterion | Verification Command | Pass Condition |
-| :--- | :--- | :--- | :--- |
-| **Gate G0** | Compilation & Formatter | `cmake --build --preset windows-x64-release` | 0 errors, 0 warnings |
-| **Gate G1** | Verification Coverage | `ctest -R Test_Audio*` | 100% tests pass; coverage $\ge 90\%$ |
-| **Gate G2** | Security Audit | `scripts/security-audit-scan.sh --target audio` | 0 high/critical issues |
-| **Gate G-Complexity** | Cyclomatic Complexity | `python scripts/check-complexity.py plugins/importer/audio` | $CC \le 6$ target, $CC \le 10$ max ceiling |
-| **Gate G-Docs** | API Documentation | Doxygen comment check | 100% audio functions documented |
-| **Gate G-Review** | Independent Council | GitHub PR Conversation Sign-Off | Approval comment from Code Reviewer Council |
+| Gate | Gate Name | Pass Criteria | Verification Evidence | Status |
+| :--- | :--- | :--- | :--- | :---: |
+| **Gate G0** | Build & Lint | 0 compiler warnings, `clang-format` clean | `cmake --build build` exit 0 | `[ ]` |
+| **Gate G1** | Tests & Traceability | `TC-2.4.1` .. `TC-2.4.5` pass 100% | `ctest -R test_audio_extractor|test_audio_conform_bypass|test_peak_waveform_generator|test_multi_channel_router|test_audio_resampler` | `[ ]` |
+| **Gate G2** | Security Gateway | ASan clean, 0 out-of-bounds reads/writes across 32 channels | `security-audit` report on PR | `[ ]` |
+| **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
+| **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 5 audio headers | Doxygen build clean | `[ ]` |
+| **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |

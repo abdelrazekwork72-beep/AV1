@@ -1,252 +1,174 @@
-# User Story Specification Kit: US-4.2.0
+# User Story `US-4.2.0`: Cross-Platform MultiCPackConfig Packaging & License Audit
 
-## Cross-Platform CPack Distribution, Dual-License Compliance & CI/CD Packaging
-
-| Metadata | Value |
-| :--- | :--- |
-| **Story ID** | `US-4.2.0` |
-| **Module ID** | `module-4-integration-qa` |
-| **Feature Name** | CPack Multi-Platform Installer Packaging, Silent Deployment & Dual-License Compliance |
-| **Target Binary** | `OpenMedia-Setup.msi` / `OpenMedia-Setup.pkg` |
-| **Story Score ($S_{\text{story}}$)** | **2.00 / 5.00** $\to$ **$K = 3$ Implementation Units** |
-| **Branch Convention** | `feat/us-4.2.0-cpack-distribution-packaging` |
-| **Unit Branches** | `feat/us-4.2.0/unit-N-<slug>` ($N \in [1..3]$) |
-| **PR Hierarchy** | Units $1..3 \to$ Story PR $\to$ `feat/module-4-integration-qa` |
+- **Module**: `module-4-integration-qa`
+- **Story Branch**: `feat/us-4.2.0-cpack-distribution-packaging`
+- **Field Profile**: `software` (`.agents/field-profile.json`)
+- **Story Decomposition Score ($S_{\text{story}}$)**: `2.00` $\to$ **`3` Parallel Implementation Units (`unit-1..3`)**
 
 ---
 
 ## 1. Spec Kit Specifications
 
-### 1.1 Narrative, Persona & Business Value
-- **Persona**: Systems Administrator and Video Editor deploying OpenMedia across enterprise editing suites (Windows and macOS).
-- **Narrative**: Installing third-party plugins manually by copying files into deeply nested system directories is error-prone and prohibited in managed enterprise IT environments. Furthermore, because OpenMedia links against open-source libraries (FFmpeg, SVT-AV1, libvpx) licensed under LGPL/GPL while interacting with the Adobe MediaCore SDK, the distribution packages must strictly respect licensing boundaries (dynamic linking, source code offers, zero proprietary Adobe headers committed or bundled). By automating CPack packaging for Windows MSI/NSIS and macOS PKG/DMG installers with silent installation flags, code signing readiness, and an automated dual-license audit gate, OpenMedia provides a polished, frictionless installation workflow for single users and studio-wide IT rollouts alike.
-- **Business Value**: Enables friction-free 1-click installation for end-users, automated remote deployment via MDM/SCCM for studios, and 100% legal compliance with open-source licensing.
+### 1.1 User Story Narrative
+> **As a** release engineer and studio systems administrator deploying OpenMedia across Windows and macOS editing workstations,  
+> **I want** a CMake/CPack packaging pipeline (`MultiCPackConfig.cmake` modeled on `SamuelMarks/premiere-pro-cmake-plugin`) that builds Windows `.msi`/`.exe` installers targeting `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore` and macOS `.pkg`/`.dmg` installers targeting `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore`, paired with an automated SPDX dual-license compliance auditor verifying zero proprietary Adobe SDK headers and complete LGPLv2.1+/GPLv3 + MIT/Apache-2.0 notices,  
+> **So that** end-users can install both Premiere Pro and Media Encoder plugins in one click with 100% open-source legal compliance.
 
-#### 1.1.1 Explicit Preconditions
-1. CMake build completes in Release mode, generating `libOpenMediaCore.dll`/`.dylib`, `OpenMedia_Importer.prm`/`.bundle`, and `OpenMedia_Exporter.prm`/`.bundle`.
-2. Adobe MediaCore target directories are defined in CMake install rules.
-3. WiX Toolset or NSIS is available on Windows runner; `pkgbuild`/`productbuild` is available on macOS runner.
+#### 1.1.1 Preconditions
+- Release binaries `OpenMedia_Importer.prm`/`.bundle`, `OpenMedia_Exporter.prm`/`.bundle`, and `libOpenMediaCore.dll`/`.dylib` compiled.
+- CPack (`WIX`/`NSIS` on Windows; `productbuild`/`DragNDrop` on macOS) and Python 3 installed.
 
-#### 1.1.2 Explicit Postconditions
-1. `cpack -G WIX` / `cpack -G NSIS` produces signed Windows `.msi` / `.exe` installer.
-2. `cpack -G productbuild` produces signed macOS `.pkg` / `.dmg` installer.
-3. Installers accurately place plugins into the standard MediaCore directory (`Common/Plug-ins/7.0/MediaCore`) and register clean uninstall entries.
-4. Dual-license auditor confirms 0 proprietary Adobe SDK headers are included in the bundle, and `LICENSE` / source disclosure documents are placed in the installation root.
+#### 1.1.2 Postconditions
+- `CPackConfig_Windows.cmake` generates a Windows installer deploying `.prm` connectors and `libOpenMediaCore.dll` to `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`.
+- `CPackConfig_macOS.cmake` generates a macOS installer deploying `.bundle` Cocoa bundles and `libOpenMediaCore.dylib` to `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/`.
+- `MultiCPackConfig.cmake` and `audit_licenses.py` verify that 0 Adobe SDK header files (`PrSDK*.h`) exist in the repository or staging archive and generate `THIRD_PARTY_LICENSES.md` covering MIT/Apache-2.0 (Connectors) and LGPLv2.1+/GPLv3 (Core Engine & FFmpeg).
 
----
-
-### 1.2 Gherkin Acceptance Criteria
+### 1.2 Acceptance Criteria (Gherkin Scenarios)
 
 ```gherkin
-Feature: Multi-Platform CPack Distribution and License Auditing
+Feature: Cross-Platform MultiCPackConfig Installers (MediaCore/7.0) and Dual-License Compliance Auditing
 
-  Scenario: Windows MSI installer deployment
-    Given a freshly compiled OpenMedia release build on Windows
-    When CPack generates OpenMedia-Setup-1.0.0-win64.msi
-    And msiexec /i OpenMedia-Setup-1.0.0-win64.msi /qn is executed
-    Then OpenMedia_Importer.prm and OpenMedia_Exporter.prm are installed to:
-      "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\"
-    And libOpenMediaCore.dll is present in the application directory.
+  Scenario: AC-1 — Windows MSI/NSIS Installer Targeting MediaCore/7.0
+    Given a Windows x64 Release build of OpenMedia_Importer.prm, OpenMedia_Exporter.prm, and libOpenMediaCore.dll
+    When CPack executes with CPackConfig_Windows.cmake
+    Then an installer package is produced targeting "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\"
+    And supports silent enterprise installation (/qn) and clean uninstallation
 
-  Scenario: macOS PKG installer deployment
-    Given a freshly compiled OpenMedia release build on macOS
-    When CPack generates OpenMedia-Setup-1.0.0-Darwin.pkg
-    And installer -pkg OpenMedia-Setup-1.0.0-Darwin.pkg -target / is executed
-    Then plugin bundles are placed in:
-      "/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/"
-    And quarantine attributes are handled cleanly.
+  Scenario: AC-2 — macOS PKG/DMG Installer Targeting MediaCore/7.0
+    Given a macOS Release build of OpenMedia_Importer.bundle, OpenMedia_Exporter.bundle, and libOpenMediaCore.dylib
+    When CPack executes with CPackConfig_macOS.cmake
+    Then a .pkg / .dmg installer is produced targeting "/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/"
+    And preserves Cocoa bundle Info.plist, PkgInfo, and POSIX 755/644 permissions
 
-  Scenario: Automated dual-license compliance audit
-    Given an assembled distribution package directory
-    When DualLicenseCompliancePackager scans all files in the package
-    Then 0 Adobe SDK header files (*.h) are found
-    And LGPL-3.0 / GPL-3.0 copyleft notices and source code links are present
-    And SPDX license identifiers are verified across all delivered binaries.
+  Scenario: AC-3 — MultiCPackConfig Orchestration and Automated Dual-License Compliance Audit
+    Given the staged release directory and source tree
+    When audit_licenses.py and generate_third_party_notices.py are executed
+    Then the auditor confirms 0 proprietary Adobe SDK headers exist in the release package or tracked source tree
+    And verifies dynamic linking separation between MIT/Apache-2.0 connectors and LGPLv2.1+/GPLv3 libOpenMediaCore
+    And generates THIRD_PARTY_LICENSES.md with complete SPDX identifiers
 ```
-
----
 
 ### 1.3 Test Cases & Traceability Matrix
 
-| Test ID | Category | Description | Covered Unit | Expected Result |
-| :--- | :--- | :--- | :--- | :--- |
-| `TC-4.2-01` | Windows Install | MSI silent install and uninstall validation | `Unit-1` | MSI installs cleanly with `/qn`; uninstalls leaving zero orphaned files |
-| `TC-4.2-02` | macOS Install | PKG / DMG installation to MediaCore directory | `Unit-2` | Bundle correctly installed with proper POSIX permissions (755/644) |
-| `TC-4.2-03` | License Audit | Automated scan for proprietary Adobe headers | `Unit-3` | 0 proprietary files found; returns exit code 0 |
-| `TC-4.2-04` | Legal Notice | Verification of LGPL / GPL dynamic linking notice | `Unit-3` | `THIRD_PARTY_LICENSES.md` generated with full text for FFmpeg/SVT-AV1 |
-| `TC-4.2-05` | CI/CD | CPack invocation across Windows and macOS presets | `Unit-1,2` | CPack generates valid artifacts under 3 minutes |
+| Test Case ID | Mapped AC | Owning Unit | Test Level | Input Vector | Expected Result & Pass Threshold |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| `TC-4.2.1` | `AC-1` | `unit-1` | Packaging | Run `ctest -R test_windows_cpack` | Validates `CPackConfig_Windows.cmake` & `wix_patch.xml` install path `Adobe/Common/Plug-ins/7.0/MediaCore` |
+| `TC-4.2.2` | `AC-2` | `unit-2` | Packaging | Run `ctest -R test_macos_cpack` | Validates `CPackConfig_macOS.cmake`, `distribution.xml`, and `postinstall.sh` |
+| `TC-4.2.3` | `AC-3` | `unit-3` | Compliance | Run `pytest / python3 tests/packaging/test_license_audit.py` | 0 proprietary headers detected; `THIRD_PARTY_LICENSES.md` generated; exit 0 |
 
 ---
 
 ## 2. Technical Implementation Plan
 
-### 2.1 Domain Invariants, Data Models & Storage Schema
+### 2.1 Domain Invariants
+- **Universal Creative Cloud `MediaCore/7.0` Target Path**:
+  - Windows: `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`
+  - macOS: `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore`
+  (The `7.0` directory is the fixed shared MediaCore path across all modern Creative Cloud releases of Premiere Pro, Media Encoder, After Effects, and Audition.)
 
-```cmake
-# CMake / CPack Configuration Architecture
-set(CPACK_PACKAGE_NAME "OpenMedia")
-set(CPACK_PACKAGE_VENDOR "OpenMedia Community")
-set(CPACK_PACKAGE_VERSION_MAJOR 1)
-set(CPACK_PACKAGE_VERSION_MINOR 0)
-set(CPACK_PACKAGE_VERSION_PATCH 0)
-
-# Windows Destination
-set(MEDIACORE_DIR_WIN "Adobe/Common/Plug-ins/7.0/MediaCore")
-# macOS Destination
-set(MEDIACORE_DIR_MAC "Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore")
-
-# Licensing and Documentation
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
-set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
-```
-
-### 2.2 Sequence Diagram: CI/CD Build, Audit & CPack Flow
+### 2.2 Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant CI as CI/CD Pipeline (GitHub Actions)
-    participant Build as CMake Build Release
-    participant Auditor as DualLicenseCompliancePackager
-    participant CPackWin as WindowsMsiInstallerScript
-    participant CPackMac as MacOsPkgDmgInstallerScript
+    participant CI as CI / Release Runner
+    participant Multi as MultiCPackConfig & License Auditor (unit-3)
+    participant Win as Windows CPack (unit-1)
+    participant Mac as macOS CPack (unit-2)
 
-    CI->>Build: cmake --build --preset <os>-release
-    Build-->>CI: OpenMedia_Importer, OpenMedia_Exporter, libOpenMediaCore
-    CI->>Auditor: AuditLicenseBoundaries(stagingDir)
-    alt Proprietary Adobe Header Detected
-        Auditor-->>CI: FAIL (Non-compliant proprietary file found)
-        CI->>CI: Cancel Build & Alert
-    else Clean Licensing
-        Auditor-->>CI: PASS (100% compliant)
-        opt Windows Runner
-            CI->>CPackWin: cpack -G WIX --config CPackConfig.cmake
-            CPackWin-->>CI: OpenMedia-Setup.msi
-        end
-        opt macOS Runner
-            CI->>CPackMac: cpack -G productbuild --config CPackConfig.cmake
-            CPackMac-->>CI: OpenMedia-Setup.pkg
-        end
-        CI->>CI: Upload Release Artifacts & Sign
+    CI->>Multi: audit_licenses.py & generate_third_party_notices.py
+    Multi-->>CI: 0 Adobe Headers Verified + THIRD_PARTY_LICENSES.md Generated
+    CI->>Multi: Include MultiCPackConfig.cmake
+    par Windows Packaging
+        Multi->>Win: CPackConfig_Windows.cmake (WIX / NSIS -> MediaCore/7.0)
+        Win-->>CI: OpenMedia-Setup-win64.msi
+    and macOS Packaging
+        Multi->>Mac: CPackConfig_macOS.cmake (productbuild / DMG -> MediaCore/7.0)
+        Mac-->>CI: OpenMedia-Setup-macOS.pkg
     end
 ```
 
 ---
 
-## 3. Expected Folder Architecture at the Project
+## 3. Expected Folder Architecture
 
-```
-packaging/
-├── cpack/
-│   ├── CPackConfig.cmake
-│   ├── windows/
-│   │   ├── wix_patch.xml
-│   │   ├── installer_banner.bmp
-│   │   └── installer_dialog.bmp
-│   └── macos/
-│       ├── distribution.xml
-│       ├── welcome.html
-│       └── postinstall.sh
-├── scripts/
-│   ├── audit_licenses.py
-│   └── generate_third_party_notices.py
-└── CMakeLists.txt
+```text
+AV1/
+├── packaging/
+│   ├── cpack/
+│   │   ├── MultiCPackConfig.cmake               # Owned by unit-3
+│   │   ├── CPackConfig_Windows.cmake            # Owned by unit-1
+│   │   ├── CPackConfig_macOS.cmake              # Owned by unit-2
+│   │   ├── windows/
+│   │   │   └── wix_patch.xml                    # Owned by unit-1
+│   │   └── macos/
+│   │       ├── distribution.xml                 # Owned by unit-2
+│   │       └── postinstall.sh                   # Owned by unit-2
+│   └── scripts/
+│       ├── audit_licenses.py                    # Owned by unit-3
+│       └── generate_third_party_notices.py      # Owned by unit-3
+└── tests/
+    └── packaging/
+        ├── test_windows_cpack.cmake             # Owned by unit-1
+        ├── test_macos_cpack.cmake               # Owned by unit-2
+        └── test_license_audit.py                # Owned by unit-3
 ```
 
 ---
 
 ## 4. Implementation Units in Detail & Specialist Agent Assignment
 
-### 4.1 Unit Sizing Decision Matrix & Score Calculation
+### 4.1 Story Decomposition Score ($S_{\text{story}}$) & Dynamic Unit Count ($K$)
+- **$D_1$ (35% Surface)**: `2` (3 packaging subsystems: Windows MSI/NSIS config, macOS PKG/DMG config, `MultiCPackConfig` + SPDX License Auditor)
+- **$D_2$ (25% Volume)**: `2` (~500 LOC CMake/CPack & Python scripts)
+- **$D_3$ (20% Complexity)**: `2` (Cross-platform installer pathing, POSIX/ACL permissions, SPDX license boundary verification)
+- **$D_4$ (20% Boundaries)**: `2` (3 disjoint file groups)
+- **Calculated Score**: $S_{\text{story}} = 0.35(2) + 0.25(2) + 0.20(2) + 0.20(2) = \mathbf{2.00} \to \mathbf{3\text{ Parallel Units}}$
 
-$$S_{\text{story}} = 0.35 D_1 + 0.25 D_2 + 0.20 D_3 + 0.20 D_4$$
-- $D_1 = 3$ (Windows MSI CPack script, macOS PKG/DMG CPack script, dual-license audit & packager)
-- $D_2 = 2$ (~500 LOC CMake/CPack + scripts)
-- $D_3 = 2$ (License compatibility auditing, installer signing/notarization, automated CI build matrix)
-- $D_4 = 1$ (Packaging configs directory)
-$$S_{\text{story}} = (0.35 \times 3) + (0.25 \times 2) + (0.20 \times 2) + (0.20 \times 1) = 1.05 + 0.50 + 0.40 + 0.20 = 2.15 \implies K = 3$$
+### 4.2 Detailed Unit Specifications (`unit-1..3`)
 
-### 4.2 Dynamic $K$ Implementation Unit Specifications
+#### `unit-1` (`feat/us-4.2.0/unit-1-windows-msi-installer`)
+- **Deliverable Scope**: `packaging/cpack/CPackConfig_Windows.cmake` and `packaging/cpack/windows/wix_patch.xml` packaging `OpenMedia_Importer.prm`, `OpenMedia_Exporter.prm`, and `libOpenMediaCore.dll` into `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`, plus `tests/packaging/test_windows_cpack.cmake`.
+- **Owned Files**: `packaging/cpack/CPackConfig_Windows.cmake`, `packaging/cpack/windows/wix_patch.xml`, `tests/packaging/test_windows_cpack.cmake`.
+- **Target Complexity**: $CC \le 4$, nesting $\le 2$.
 
-#### Unit 1: Windows WiX / NSIS CPack Installer Script
-- **ID**: `unit-1`
-- **Branch**: `feat/us-4.2.0/unit-1-windows-msi-installer`
-- **Objective**: Configures CPack WiX/NSIS to deploy plugins and runtime DLLs into the Windows MediaCore directory with silent install (`/qn`) and clean uninstallation.
-- **Files Owned**:
-  - `packaging/cpack/windows/wix_patch.xml`
-  - `packaging/cpack/windows/installer_banner.bmp`
-  - `packaging/cpack/windows/installer_dialog.bmp`
-  - `packaging/cpack/CPackConfig_Windows.cmake`
-- **Verification**: `cpack -G WIX` generates a valid MSI installer verified with `msiexec`.
+#### `unit-2` (`feat/us-4.2.0/unit-2-macos-pkg-installer`)
+- **Deliverable Scope**: `packaging/cpack/CPackConfig_macOS.cmake`, `packaging/cpack/macos/distribution.xml`, and `packaging/cpack/macos/postinstall.sh` packaging `.bundle` plugins and `libOpenMediaCore.dylib` into `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore/`, plus `tests/packaging/test_macos_cpack.cmake`.
+- **Owned Files**: `packaging/cpack/CPackConfig_macOS.cmake`, `packaging/cpack/macos/distribution.xml`, `packaging/cpack/macos/postinstall.sh`, `tests/packaging/test_macos_cpack.cmake`.
+- **Target Complexity**: $CC \le 4$, nesting $\le 2$.
 
-#### Unit 2: macOS Productbuild / DMG CPack Installer Script
-- **ID**: `unit-2`
-- **Branch**: `feat/us-4.2.0/unit-2-macos-pkg-installer`
-- **Objective**: Configures CPack productbuild to deploy plugin bundles to the macOS MediaCore directory with root permissions and notarization readiness.
-- **Files Owned**:
-  - `packaging/cpack/macos/distribution.xml`
-  - `packaging/cpack/macos/welcome.html`
-  - `packaging/cpack/macos/postinstall.sh`
-  - `packaging/cpack/CPackConfig_macOS.cmake`
-- **Verification**: `cpack -G productbuild` creates installable `.pkg` verified with `installer -pkg`.
+#### `unit-3` (`feat/us-4.2.0/unit-3-license-compliance-packager`)
+- **Deliverable Scope**: `packaging/cpack/MultiCPackConfig.cmake`, `packaging/scripts/audit_licenses.py`, `packaging/scripts/generate_third_party_notices.py`, and `tests/packaging/test_license_audit.py` enforcing zero proprietary Adobe SDK header leakage and generating complete MIT/Apache-2.0 + LGPLv2.1+/GPLv3 legal notices.
+- **Owned Files**: `packaging/cpack/MultiCPackConfig.cmake`, `packaging/scripts/audit_licenses.py`, `packaging/scripts/generate_third_party_notices.py`, `tests/packaging/test_license_audit.py`.
+- **Target Complexity**: $CC \le 5$, nesting $\le 2$.
 
-#### Unit 3: Dual-License Compliance & SPDX Auditor
-- **ID**: `unit-3`
-- **Branch**: `feat/us-4.2.0/unit-3-license-compliance-packager`
-- **Objective**: Automates licensing audit, ensuring LGPL/GPL copyleft compliance for FFmpeg, generating `THIRD_PARTY_LICENSES.md`, and enforcing zero Adobe proprietary header leaks.
-- **Files Owned**:
-  - `packaging/scripts/audit_licenses.py`
-  - `packaging/scripts/generate_third_party_notices.py`
-- **Verification**: `python packaging/scripts/audit_licenses.py` scans build output and returns exit code 0.
+### 4.3 Best-Fit Specialist Agents per Unit
 
-### 4.3 Specialist Agent Assignment
-
-| Unit | Subagent Type | Specialist Role |
-| :--- | :--- | :--- |
-| `unit-1` | `agency-devops-automator` | Windows Installer & MSI/WiX Specialist |
-| `unit-2` | `agency-mobile-release-engineer` | macOS Packaging & Apple Notarization Specialist |
-| `unit-3` | `agency-compliance-auditor` | Open-Source Licensing & Compliance Specialist |
-
-### 4.4 Shared Base Contract & Seeding Plan
-- `CPackConfig.cmake` is parameterized so that Windows and macOS units only customize their respective platform includes.
-- License compliance script acts as an independent gatekeeper.
+| Unit ID | Branch Name | Primary Implementer Agent | Reviewing Council Agents | Mandatory Skills Enforced |
+| :--- | :--- | :--- | :--- | :--- |
+| `unit-1` | `feat/us-4.2.0/unit-1-windows-msi-installer` | `devops-automator` | `code-reviewer`, `security-architect` | `code-review-council`, `security-audit` |
+| `unit-2` | `feat/us-4.2.0/unit-2-macos-pkg-installer` | `mobile-release-engineer` | `code-reviewer`, `devops-automator` | `code-review-council`, `cyclomatic-complexity` |
+| `unit-3` | `feat/us-4.2.0/unit-3-license-compliance-packager` | `compliance-auditor` | `code-reviewer`, `security-architect` | `code-review-council`, `security-audit` |
+| **Patch** | `patch/us-4.2.0-<scope>` | `patch-implementer` | `code-reviewer-council-president` | Full Gate Verification |
 
 ---
 
-## 5. Security Gateway powered by `security-audit`
+## 5. Security Gateway (`security-audit`)
 
-### 5.1 Trust Boundaries & Actors
-- **Target System**: Elevated administrative privilege required to install to `%ProgramFiles%` / `/Library/Application Support`.
-- **Installer Binary**: Deliverable downloaded by end-users; must be tamper-proof.
-
-### 5.2 STRIDE Threat Matrix & ASVS 5.0 Controls
-
-| Threat Category | Scenario | Mitigation / ASVS 5.0 Control |
-| :--- | :--- | :--- |
-| **Tampering** | Man-in-the-middle injection of malicious DLL into installer | Authenticode code signing (Windows) & Apple Notarization (macOS) |
-| **Elevation of Privilege** | Insecure file permissions allowing unprivileged users to replace `.prm` | Strict ACLs: read/execute for Users, write only for Administrators |
-| **Repudiation** | Ambiguity about software provenance or license terms | Embedded SPDX tags and signed release manifests |
-
-### 5.3 Global Cryptographic, Jurisdictional & Data Protection Controls
-- Binaries signed using SHA-256 Authenticode and Apple Developer ID certificates with RFC 3161 timestamps.
-
-### 5.4 Automated Security Verification Checklist
-- [x] Installer directory permissions verified: unprivileged users cannot write to plugin destination.
-- [x] Post-install scripts contain zero unsafe `eval` or unchecked environment variable substitutions.
-
-### 5.5 Gate G2 Sign-Off Checklist
-- [x] All shipped binaries pass VirusTotal / Microsoft Defender clean scan.
-- [x] 100% clean license audit: zero proprietary Adobe copyright notices in distributed binaries.
+| Threat ID | STRIDE | ASVS / CWE | Attack Scenario | Impact | Mitigation Control |
+| :--- | :---: | :---: | :--- | :---: | :--- |
+| `TM-4.2.1` | **E**levation of Privilege | CWE-732 | World-writable permissions on installed `.prm`/`.bundle` in `MediaCore/7.0` | Critical | Enforce root/Administrator-only write permissions (`0755` / Windows ACLs) in installer scripts |
+| `TM-4.2.2` | **T**ampering | CWE-78 | Shell injection in macOS `postinstall.sh` | High | `set -euo pipefail`, quoted static paths, zero `eval` statements |
 
 ---
 
 ## 6. Validation Gates & Acceptance Sign-Off
 
-| Gate | Criterion | Verification Command | Pass Condition |
-| :--- | :--- | :--- | :--- |
-| **Gate G0** | Compilation & Formatter | `cmake --build --preset windows-x64-release` | 0 errors, 0 warnings |
-| **Gate G1** | Verification Coverage | `python packaging/scripts/audit_licenses.py` | 100% compliant; 0 proprietary leaks |
-| **Gate G2** | Security Audit | `scripts/security-audit-scan.sh --target packaging` | 0 high/critical issues |
-| **Gate G-Complexity** | Cyclomatic Complexity | `python scripts/check-complexity.py packaging/scripts` | $CC \le 6$ target, $CC \le 10$ max ceiling |
-| **Gate G-Docs** | API Documentation | Check `THIRD_PARTY_LICENSES.md` & README | Complete legal disclosures present |
-| **Gate G-Review** | Independent Council | GitHub PR Conversation Sign-Off | Approval comment from Code Reviewer Council |
+| Gate | Gate Name | Pass Criteria | Verification Evidence | Status |
+| :--- | :--- | :--- | :--- | :---: |
+| **Gate G0** | Build & Lint | CMake & Python scripts pass lint/format checks | `flake8` / `cmake --build build` exit 0 | `[ ]` |
+| **Gate G1** | Tests & Traceability | `TC-4.2.1` .. `TC-4.2.3` pass 100% | `ctest -R test_windows_cpack|test_macos_cpack|test_license_audit` | `[ ]` |
+| **Gate G2** | Security Gateway | 0 proprietary leaks, safe installer permissions | `security-audit` report on PR | `[ ]` |
+| **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
+| **Gate G-Docs** | Documentation | Complete packaging and licensing documentation | `THIRD_PARTY_LICENSES.md` verified | `[ ]` |
+| **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |

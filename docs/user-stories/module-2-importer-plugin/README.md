@@ -4,63 +4,75 @@
 - **Module Branch**: `feat/module-2-importer-plugin`
 - **Field Profile**: `software` (`.agents/field-profile.json`)
 - **Primary Deliverables**:
-  1. Native Premiere Pro Importer connector binary (`OpenMedia_Importer.prm` on Windows, `.bundle` on macOS) implementing `xImportEntry`.
-  2. IMPT and PiPL resource integration with high priority ($\ge 100$) overriding defective built-in importers.
-  3. 8-bit, 10-bit, and 12-bit HDR video decoding pipeline (`imGetSourceVideo`) honoring 16-byte rowbytes stride alignment.
-  4. High-efficiency scrubbing and playback engine via async I/O (`imCreateAsyncImporter`), PPix frame/seek caching, and a 50% dynamic RAM limiter.
-  5. Zero-conform 32-bit floating point planar audio pipeline (`imImportAudio7`) with instant waveform peak delivery (`imGetPeakAudio`) and 5.1/32-channel surround sound support.
+  1. Native Premiere Pro & Media Encoder Importer connector binary (`OpenMedia_Importer.prm` on Windows, `OpenMedia_Importer.bundle` on macOS) implementing `xImportEntry` (Open-source replacement for **Autokroma Influx**).
+  2. `IMPT` and `PiPL` binary resource definitions with priority $\ge 100$ overriding built-in importers for `.mkv`, `.webm`, `.mp4`, `.mov`, `.ogg`, `.avi`, `.flv`, with automatic `imBadFile` fallback when native handling is preferred.
+  3. 8-bit, 10-bit, and 12-bit HDR + Alpha video decoding pipeline (`imGetSourceVideo`) honoring `PrSDKPPixSuite` 16-byte `rowbytes` stride alignment.
+  4. High-speed scrubbing engine via `imCreateAsyncImporter` (`AsyncImporterEntry` / `aiClose`), `PrSDKPPixCacheSuite` frame/thumbnail caching, GOP keyframe indexing + Ring Buffer (5%–20% scrub speedup), `imQuietFile` + 50% dynamic RAM governor (`outExtraMemoryUsage` / `highMemUsage`), and GPU decoding (`d3d11va`, `nvdec`, `vulkan`).
+  5. Zero-conform 32-bit floating point planar audio pipeline (`imImportAudio7`) with `avoidAudioConform = kPrTrue` (`imInit`) + `kRandomAccessImport` (`imGetInfo8`), instant waveform peak delivery (`imGetPeakAudio`), and up to 32-channel surround routing (`imGetAudioChannelLayout`).
 
 ---
 
 ## 1. Module Overview & Selectors Lifecycle
 
-The Importer Plugin operates as an active bridge translating Adobe Premiere Pro’s timeline and file operations into calls against `libOpenMediaCore`. It follows the standard `xImportEntry` selectors lifecycle:
+The Importer Plugin translates Adobe Premiere Pro’s SweetPea selector calls into `libOpenMediaCore` invocations across the complete `xImportEntry` and `AsyncImporterEntry` lifecycles:
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Host as Adobe Premiere Pro / Media Encoder
     participant Imp as OpenMedia_Importer (xImportEntry)
+    participant Async as AsyncImporterEntry (Worker)
+    participant Cache as PrSDKPPixCacheSuite & RingBuffer
     participant Core as libOpenMediaCore
 
-    Note over Host,Imp: Phase 1: Registration & Priority (imInit & imGetIndFormat)
+    Note over Host,Imp: Phase 1: Registration, Priority & Audio Conform Bypass (imInit & imGetIndFormat)
     Host->>Imp: imInit (stdParms, importInfoRec)
-    Imp-->>Host: canOpen=true, priority=100
-    loop For each supported extension (.mkv, .webm, .ogg, .flv)
+    Imp-->>Host: canOpen=kPrTrue, hasSetup=kPrTrue, priority=100, avoidAudioConform=kPrTrue, canProvidePeakAudio=kPrTrue
+    loop Format Enumeration (.mkv, .webm, .ogg, .flv, .avi, .mp4, .mov)
         Host->>Imp: imGetIndFormat (formatIndex, imIndFormatRec)
-        Imp-->>Host: Return extension & format name
+        Imp-->>Host: Return extension/FourCC or imBadFormatIndex when done
     end
 
-    Note over Host,Imp: Phase 2: File Open & Stream Probing
-    Host->>Imp: imOpenFile8 (fileAccessRec, fileInfoRec8)
-    Imp->>Core: CoreDemuxer::openFile(filepath)
-    Core-->>Imp: File streams discovered
-    Imp-->>Host: Store instance handle in privatedata, imNoErr
-    Host->>Imp: imGetInfo8 (fileAccessRec, fileInfoRec8)
-    Imp-->>Host: vidScale/vidSampleSize timebase, width, height, supportsGetSourceVideo=true
-    opt Multi-Track File
-        Host->>Imp: imGetInfo8 (streamIdx=1, 2...)
-        Imp-->>Host: Return imIterateStreams until done
+    Note over Host,Imp: Phase 2: File Open, Stream Probing & RAM Accounting (imOpenFile8 & imGetInfo8)
+    Host->>Imp: imOpenFile8 (fileAccessRec8)
+    Imp->>Core: CoreDemuxer::openFile(utf8Path)
+    alt Unsupported / Native Preferred
+        Imp-->>Host: Return imBadFile (Delegate to lower-priority built-in importer)
+    else Accepted by OpenMedia
+        Imp-->>Host: Report outExtraMemoryUsage, store ImporterInstance in privatedata, return imNoErr
+    end
+    Host->>Imp: imGetInfo8 (fileAccessRec8, fileInfoRec8)
+    Imp-->>Host: vidScale/vidSampleSize, supportsGetSourceVideo=kPrTrue, supportsAsyncIO=kPrTrue, highMemUsage=kPrTrue, accessModes|=kRandomAccessImport
+    opt Multi-Track MKV/WebM (streamIdx = 0..N)
+        Host->>Imp: imGetInfo8 (streamIdx++)
+        Imp-->>Host: imIterateStreams for each track, then imBadStreamIndex
     end
 
-    Note over Host,Imp: Phase 3: Timeline Scrubbing & Decoding
-    par Video Frame Request
-        Host->>Imp: imGetSourceVideo (sourceVideoRec)
-        Imp->>Core: CoreVideoDecoder::decodeNextFrame()
-        Core-->>Imp: AVFrame
-        Imp->>Imp: sws_scale with 16-byte rowbytes dstStride
-        Imp-->>Host: PPixHand (outFrame)
-    and Audio Sample Request
+    Note over Host,Imp: Phase 3: Async I/O, Video Scrubbing (imGetSourceVideo) & Zero-Conform Audio (imImportAudio7)
+    Host->>Imp: imCreateAsyncImporter
+    Imp-->>Host: Register AsyncImporterEntry & aiClose
+    par Video Frame Request (imGetSourceVideo)
+        Host->>Async: imGetSourceVideo (sourceVideoRec)
+        Async->>Cache: Check PrSDKPPixCacheSuite & GOP RingBuffer
+        alt Cache Miss
+            Async->>Core: CoreVideoDecoder::decodeNextFrame() (CPU dav1d/vpx or GPU d3d11va/nvdec/vulkan)
+            Async->>Async: Lock PPix, GetRowBytes (16-byte aligned), sws_scale(dstStride = rowbytes)
+            Async->>Cache: AddFrameToCache(PPixHand)
+        end
+        Async-->>Host: Assign *sourceVideoRec->outFrame, return imNoErr
+    and Audio Sample & Waveform Request (imImportAudio7 & imGetPeakAudio)
         Host->>Imp: imImportAudio7 (audioRec7)
-        Imp->>Core: CoreAudioDecoder::decodeAudioBatch()
-        Core-->>Imp: Planar 32f buffer
-        Imp-->>Host: Copy to float** buffer (0 conform)
+        Imp->>Core: CoreAudioDecoder::decodeAudioBatch() -> 32-bit float planar
+        Imp-->>Host: Populate float* audio[channels] (0 .cfa/.pek disk conform)
+        Host->>Imp: imGetPeakAudio (peakAudioRec)
+        Imp-->>Host: Return min/max peak arrays in < 50ms
     end
 
-    Note over Host,Imp: Phase 4: Teardown
-    Host->>Imp: imCloseFile (fileAccessRec)
+    Note over Host,Imp: Phase 4: Quiet File & Teardown (imQuietFile & imCloseFile)
+    Host->>Imp: imQuietFile (Release inactive handles under memory pressure)
+    Imp->>Core: CoreDemuxer::quietFile() & MemoryGovernor::evictInactive()
+    Host->>Imp: imCloseFile
     Imp->>Core: CoreDemuxer::close()
-    Imp-->>Host: imNoErr
 ```
 
 ---
@@ -69,46 +81,90 @@ sequenceDiagram
 
 | Story ID | Branch | Title | Score ($S_{\text{story}}$) | Unit Count ($K$) | Status |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **`US-2.1.0`** | `feat/us-2.1.0-importer-registration-stream-discovery` | Importer Entry, Resource Registration & Stream Probing | 2.20 | **4 Units** | `Todo` |
-| **`US-2.2.0`** | `feat/us-2.2.0-video-decoding-pixel-alignment` | Video Frame Decoding, Color Spaces & 16-Byte Stride | 3.00 | **5 Units** | `Todo` |
-| **`US-2.3.0`** | `feat/us-2.3.0-async-caching-memory-governor` | Async I/O Importer, PPix Cache & RAM Governor | 3.20 | **6 Units** | `Todo` |
-| **`US-2.4.0`** | `feat/us-2.4.0-zero-conform-audio-pipeline` | Zero-Conform 32-bit Planar Audio & Multi-Channel Pipeline | 2.80 | **5 Units** | `Todo` |
+| **`US-2.1.0`** | `feat/us-2.1.0-importer-registration-stream-discovery` | Importer Entry, Resource Registration & Stream Probing | **2.20** | **4 Units** | `Ready` |
+| **`US-2.2.0`** | `feat/us-2.2.0-video-decoding-pixel-alignment` | Video Frame Decoding, Color Spaces & 16-Byte Stride | **3.00** | **5 Units** | `Ready` |
+| **`US-2.3.0`** | `feat/us-2.3.0-async-caching-memory-governor` | Async I/O Importer, PPix Cache, GOP Index & RAM Governor | **3.20** | **6 Units** | `Ready` |
+| **`US-2.4.0`** | `feat/us-2.4.0-zero-conform-audio-pipeline` | Zero-Conform 32-bit Planar Audio & Multi-Channel Pipeline | **2.80** | **5 Units** | `Ready` |
 
 ---
 
-## 3. Base Contract Seeding for Module 2
+## 3. Base Contract Seeding for Module 2 (`include/importer/importer_types.hpp`)
 
-To maintain **Invariant B (Zero Inter-Unit Blocking)** across all 4 stories and 20 units, the following interface declarations and selector mapping stubs are committed to `feat/module-2-importer-plugin`:
+To maintain **Invariant B (Zero Inter-Unit Blocking)** across all 4 stories and 20 units in Module 2, the unified base contract is committed to `feat/module-2-importer-plugin` before branching:
 
 ```cpp
 // include/importer/importer_types.hpp
 #pragma once
 #include <openmedia/core_types.hpp>
-#include <vector>
+#include <chrono>
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace openmedia::importer {
 
-// Forward declarations of Adobe SDK types to isolate connector compilation
 using prPluginID = int32_t;
 using prSelector = int32_t;
 using prReturnCode = int32_t;
+using PPixHand = void*;
 
-struct ImporterInstance {
-    std::shared_ptr<ICoreDemuxer> demuxer;
-    std::shared_ptr<ICoreVideoDecoder> videoDecoder;
-    std::shared_ptr<ICoreAudioDecoder> audioDecoder;
-    StreamInfo activeVideoStream;
-    std::vector<StreamInfo> activeAudioStreams;
-    int64_t currentPts{0};
-    bool supportsAsyncIO{true};
-    size_t memoryLimitBytes{0};
+// Forbidden After Effects FourCC that must never be used for Premiere Importers
+constexpr uint32_t kForbiddenAfterEffectsFourCC = 0x4D4F6F76; // 'MOov'
+constexpr uint32_t kOpenMediaImporterFourCC     = 0x4F4D4950; // 'OMIP'
+constexpr int32_t  kOpenMediaHighPriority       = 100;
+
+struct KeyframeIndexEntry {
+    int64_t frameNumber{0};
+    int64_t pts{0};
+    int64_t byteOffset{0};
+    uint32_t packetSize{0};
+    bool isKeyframe{false};
 };
 
-class IImporterSelectorDispatcher {
+struct CachedPPixEntry {
+    int64_t pts{0};
+    int64_t frameIndex{0};
+    PPixHand ppixHandle{nullptr};
+    size_t byteSize{0};
+    std::chrono::steady_clock::time_point lastAccess{};
+    bool isPinned{false};
+};
+
+struct PeakPyramidLevel {
+    uint32_t decimationFactor{256};
+    std::vector<float> minPeaks;
+    std::vector<float> maxPeaks;
+};
+
+struct ImporterInstance {
+    std::string utf8FilePath;
+    std::shared_ptr<ICoreDemuxer> demuxer;
+    std::shared_ptr<ICoreVideoDecoder> videoDecoder;
+    std::vector<std::shared_ptr<ICoreAudioDecoder>> audioDecoders;
+    StreamInfo activeVideoStream;
+    std::vector<StreamInfo> activeAudioStreams;
+    HardwareAccelBackend activeHwBackend{HardwareAccelBackend::None};
+    int64_t currentPts{0};
+    bool supportsGetSourceVideo{true};
+    bool supportsAsyncIO{true};
+    bool avoidAudioConform{true};
+    bool canProvidePeakAudio{true};
+    bool highMemUsage{true};
+    bool isQuiet{false};
+    size_t extraMemoryUsageBytes{0};
+    size_t memoryCeilingBytes{0};
+};
+
+class IImporterSelectorHandler {
 public:
-    virtual ~IImporterSelectorDispatcher() = default;
-    virtual prReturnCode dispatch(prSelector selector, void* stdParms, void* param1, void* param2) = 0;
+    virtual ~IImporterSelectorHandler() = default;
+    virtual prReturnCode handleSelector(
+        prSelector selector,
+        void* stdParms,
+        void* param1,
+        void* param2
+    ) = 0;
 };
 
 } // namespace openmedia::importer
@@ -118,8 +174,8 @@ public:
 
 ## 4. Cascading Merge & Validation Plan
 
-1. **US-2.1.0**: Units 1..4 execute $\to$ merge cascadingly into `feat/us-2.1.0-importer-registration-stream-discovery` $\to$ Review Gate G0..G-Review $\to$ merge into `feat/module-2-importer-plugin`.
-2. **US-2.2.0**: Units 1..5 execute $\to$ merge cascadingly into `feat/us-2.2.0-video-decoding-pixel-alignment` $\to$ Review Gate G0..G-Review $\to$ merge into `feat/module-2-importer-plugin`.
-3. **US-2.3.0**: Units 1..6 execute $\to$ merge cascadingly into `feat/us-2.3.0-async-caching-memory-governor` $\to$ Review Gate G0..G-Review $\to$ merge into `feat/module-2-importer-plugin`.
-4. **US-2.4.0**: Units 1..5 execute $\to$ merge cascadingly into `feat/us-2.4.0-zero-conform-audio-pipeline` $\to$ Review Gate G0..G-Review $\to$ merge into `feat/module-2-importer-plugin`.
-5. **Module Leader Integration**: Module Leader verifies the complete importer binary against Premiere Pro test footage, verifies zero regressions, and merges `feat/module-2-importer-plugin` into `main`.
+1. **US-2.1.0**: Units `unit-1..4` merge cascadingly into `feat/us-2.1.0-importer-registration-stream-discovery` $\to$ Gate G0..G-Review $\to$ `feat/module-2-importer-plugin`.
+2. **US-2.2.0**: Units `unit-1..5` merge cascadingly into `feat/us-2.2.0-video-decoding-pixel-alignment` $\to$ Gate G0..G-Review $\to$ `feat/module-2-importer-plugin`.
+3. **US-2.3.0**: Units `unit-1..6` merge cascadingly into `feat/us-2.3.0-async-caching-memory-governor` $\to$ Gate G0..G-Review $\to$ `feat/module-2-importer-plugin`.
+4. **US-2.4.0**: Units `unit-1..5` merge cascadingly into `feat/us-2.4.0-zero-conform-audio-pipeline` $\to$ Gate G0..G-Review $\to$ `feat/module-2-importer-plugin`.
+5. **Module 2 Promotion**: Module Leader runs all 20 importer unit tests under ASan/TSan and merges `feat/module-2-importer-plugin` into `main`.

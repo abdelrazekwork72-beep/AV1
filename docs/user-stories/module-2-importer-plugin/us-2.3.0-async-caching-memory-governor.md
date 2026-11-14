@@ -1,312 +1,234 @@
-# User Story Specification Kit: US-2.3.0
+# User Story `US-2.3.0`: Async I/O Importer, PPix Cache, GOP Index & RAM Governor
 
-## Asynchronous Frame Prefetch, LRU PPix Cache, Ring Buffer Index & Dynamic Memory Governor
-
-| Metadata | Value |
-| :--- | :--- |
-| **Story ID** | `US-2.3.0` |
-| **Module ID** | `module-2-importer-plugin` |
-| **Feature Name** | Asynchronous Prefetch, LRU PPix Caching, Keyframe Ring Buffer & Memory Governor |
-| **Target Binary** | `OpenMedia_Importer.prm` / `libOpenMediaCore.dll` |
-| **Story Score ($S_{\text{story}}$)** | **3.15 / 5.00** $\to$ **$K = 6$ Implementation Units** |
-| **Branch Convention** | `feat/us-2.3.0-async-caching-memory-governor` |
-| **Unit Branches** | `feat/us-2.3.0/unit-N-<slug>` ($N \in [1..6]$) |
-| **PR Hierarchy** | Units $1..6 \to$ Story PR $\to$ `feat/module-2-importer-plugin` |
+- **Module**: `module-2-importer-plugin`
+- **Story Branch**: `feat/us-2.3.0-async-caching-memory-governor`
+- **Field Profile**: `software` (`.agents/field-profile.json`)
+- **Story Decomposition Score ($S_{\text{story}}$)**: `3.20` $\to$ **`6` Parallel Implementation Units (`unit-1..6`)**
 
 ---
 
 ## 1. Spec Kit Specifications
 
-### 1.1 Narrative, Persona & Business Value
-- **Persona**: Professional Video Editor scrubbing 4K/8K 10-bit AV1 / VP9 timelines in Adobe Premiere Pro 2025/2026.
-- **Narrative**: When an editor scrubs the timeline or plays video at 1x, 2x, or reverse speeds, synchronous decoding on the main Premiere Pro rendering thread causes dropped frames, UI hitching, and spinning beachballs. By decoupling packet ingestion and frame decoding into a background worker pool with lookahead prefetching, caching decoded `PPixHand` instances in a thread-safe LRU cache, accelerating decoding via D3D11VA/NVDEC and Vulkan Video, and strictly enforcing an OS RAM ceiling via a dynamic memory governor, Premiere achieves butter-smooth real-time playback (<50ms scrub latency) without risking out-of-memory crashes.
-- **Business Value**: Delivers native editing parity with Apple ProRes and DNxHR for next-generation AV1 and WebM media without requiring offline proxy rendering workflows.
+### 1.1 User Story Narrative
+> **As a** professional video editor scrubbing 4K/8K Long-GOP and Variable Frame Rate (VFR) AV1 and VP9 timelines in Adobe Premiere Pro,  
+> **I want** the importer to implement Adobe's native asynchronous importer architecture (`imCreateAsyncImporter` with reentrant `AsyncImporterEntry` and `aiClose`), cache decoded frames and Media Browser thumbnails via `PrSDKPPixCacheSuite`, maintain an in-memory GOP keyframe seek index and decoded frame Ring Buffer (achieving the 5%–20% Influx v1.7 scrub speedup), enforce a dynamic 50% available RAM ceiling (`imOpenFileRec8.outExtraMemoryUsage`, `imFileInfoRec8.highMemUsage = kPrTrue`, and `imQuietFile`), and offload decoding to GPU hardware (`d3d11va`, `nvdec`, and FFmpeg 8.0 `vulkan`),  
+> **So that** timeline scrubbing responds in $< 50\,\text{ms}$ without UI freezes, dropped frames, or out-of-memory crashes.
 
-#### 1.1.1 Explicit Preconditions
-1. `imImportImage` is called by Premiere Pro Host for a registered open file stream (`fileRec`).
-2. Demuxing parser and codec context (`DemuxEngine`, `VideoDecoderBinding`) are initialized from `US-2.1.0` and `US-2.2.0`.
-3. System GPU drivers provide D3D11VA / DXVA2 or Vulkan Video extensions, or SVT-AV1/dav1d CPU fallback is active.
-4. Host application exposes `PrSDKPPixSuite` and `PrSDKMemorySuite` handles.
+#### 1.1.1 Preconditions
+- `US-2.1.0` and `US-2.2.0` active with `imImageInfoRec.supportsAsyncIO = kPrTrue` and `supportsGetSourceVideo = kPrTrue`.
+- Host exposes `PrSDKPPixCacheSuite`, `PrSDKPPixSuite`, and `PrSDKMemorySuite`.
 
-#### 1.1.2 Explicit Postconditions
-1. Frame requests within the prefetch window hit the `PPixLruCache` in $< 1\,\text{ms}$ without invoking `avcodec_receive_frame`.
-2. Random timeline seeks query `KeyframeIndexRingBuffer` and locate the nearest preceding keyframe with $O(\log N)$ or $O(1)$ complexity.
-3. Total process RAM allocated by OpenMedia plugin cache never exceeds the 50% available system RAM ceiling configured by `MemoryGovernor`.
-4. Dropped frames during forward playback at $1.0\times$ speed is zero on supported hardware configurations.
+#### 1.1.2 Postconditions
+- `imCreateAsyncImporter` instantiates a reentrant `AsyncImporterEntry` object with `aiClose` cleanup, decoupling disk I/O and frame decoding from Premiere's main UI thread.
+- `PPixCacheBridge` registers decoded frames and Media Browser thumbnails in `PrSDKPPixCacheSuite` so repeated requests return in $< 1\,\text{ms}$.
+- `KeyframeRingBuffer` indexes GOP keyframe file offsets/PTS and caches recent decoded frames, accelerating Long-GOP and VFR scrubbing by 5%–20%.
+- `MemoryGovernor` reports `imOpenFileRec8.outExtraMemoryUsage`, sets `imFileInfoRec8.highMemUsage = kPrTrue` (capping heavy open instances at 5), enforces a strict 50% available RAM ceiling, and releases inactive file handles upon receiving `imQuietFile`.
+- `D3D11VaNvdecDecoder` and `VulkanVideoDecoder` accelerate AV1 and VP9 decoding on GPU hardware with seamless fallback to `libdav1d` / `libvpx`.
 
----
-
-### 1.2 Gherkin Acceptance Criteria
+### 1.2 Acceptance Criteria (Gherkin Scenarios)
 
 ```gherkin
-Feature: Asynchronous Video Frame Prefetching, LRU Caching and Memory Management
+Feature: Native Asynchronous Importer (imCreateAsyncImporter), PrSDKPPixCacheSuite, GOP Ring Buffer, 50% RAM Governor, and GPU Decoding
 
-  Scenario: Cache hit on sequential forward playback
-    Given a 4K 60fps AV1 timeline playing at 1.0x speed in Premiere Pro
-    And the AsyncPrefetchEngine is running with lookahead depth of 12 frames
-    When Premiere requests frame at timestamp PTS = 1000ms
-    Then PPixLruCache returns the pre-decoded PPixHand in less than 1ms
-    And no synchronous avcodec_send_packet call is triggered on the render thread.
+  Scenario: AC-1 — Asynchronous Importer Creation and Reentrant Execution (imCreateAsyncImporter)
+    Given imImageInfoRec.supportsAsyncIO is set to kPrTrue during imGetInfo8
+    When Premiere Pro invokes selector imCreateAsyncImporter
+    Then AsyncImporterEngine creates a thread-safe async importer instance with entry point AsyncImporterEntry and close handler aiClose
+    And services concurrent imGetSourceVideo requests off the main UI thread without race conditions
 
-  Scenario: Rapid scrub with backward seeking
-    Given an editor rapidly dragging the playhead backwards from frame 500 to frame 200
-    When imImportImage receives a non-sequential frame seek request
-    Then KeyframeIndexRingBuffer identifies keyframe at frame 180 within 2ms
-    And AsyncPrefetchEngine flushes forward prefetch queue and reprioritizes backward packet decoding
-    And the requested frame is returned to Premiere within 45ms.
+  Scenario: AC-2 — Native PrSDKPPixCacheSuite Frame and Thumbnail Caching
+    Given a decoded PPixHand frame produced during imGetSourceVideo or Media Browser thumbnail scrubbing
+    When PPixCacheBridge stores the frame via PrSDKPPixCacheSuite::AddFrameToCache
+    Then subsequent requests for the same frame index retrieve the cached PPixHand via GetFrameFromCache in < 1ms
 
-  Scenario: Memory governor enforcement under tight system RAM
-    Given host system with 16 GB total RAM and only 3 GB available physical RAM
-    When PPixLruCache reaches 1.5 GB total allocated pixel buffers (50% available memory limit)
-    Then MemoryGovernor triggers emergency eviction of oldest unpinned PPixHand buffers
-    And memory usage drops to 1.0 GB without throwing bad_alloc or crashing Premiere Pro.
+  Scenario: AC-3 — GOP Keyframe Seek Indexing and Ring Buffer (5%–20% Scrub Speedup)
+    Given a Long-GOP or Variable Frame Rate (VFR) AV1/VP9 stream
+    When the editor scrubs randomly across the timeline
+    Then KeyframeRingBuffer locates the nearest preceding keyframe in O(log N) time (< 50 microseconds)
+    And serves recently decoded neighbor frames from the circular Ring Buffer, improving scrub responsiveness by 5% to 20%
 
-  Scenario: Hardware decoder fault and graceful CPU fallback
-    Given D3D11VaNvdecDecoder fails to initialize due to GPU driver reset or unsupported profile
-    When AsyncPrefetchEngine attempts decoding AV1 Main 10 profile
-    Then D3D11VaNvdecDecoder logs warning and demotes pipeline to libdav1d CPU worker
-    And frame decoding continues seamlessly without corrupting timeline display.
+  Scenario: AC-4 — Dynamic 50% RAM Governor, highMemUsage Flag, and imQuietFile Handling
+    Given a host workstation with available physical RAM monitored by MemoryGovernor
+    When imOpenFile8 and imGetInfo8 are invoked
+    Then MemoryGovernor reports decoder memory footprint in imOpenFileRec8.outExtraMemoryUsage and sets imFileInfoRec8.highMemUsage = kPrTrue
+    And caps total plugin cache below 50% of available system RAM
+    And when Premiere sends selector imQuietFile, immediately closes inactive file handles and evicts unpinned cache buffers
+
+  Scenario: AC-5 — GPU Hardware Decoding via D3D11VA, NVDEC, and FFmpeg 8.0 Vulkan Video with CPU Fallback
+    Given a 4K/8K 10-bit AV1 or VP9 stream on a system with NVIDIA/AMD/Intel GPU
+    When D3D11VaNvdecDecoder or VulkanVideoDecoder initializes hardware acceleration (d3d11va, nvdec, or vulkan)
+    Then frames are decoded on the GPU and transferred to 16-byte aligned PPix buffers
+    And if hardware initialization or driver reset fails, transparently falls back to libdav1d / libvpx software decoding
 ```
-
----
 
 ### 1.3 Test Cases & Traceability Matrix
 
-| Test ID | Category | Description | Covered Unit | Expected Result |
-| :--- | :--- | :--- | :--- | :--- |
-| `TC-2.3-01` | Concurrency | Priority queue task preemption on timeline seek | `Unit-1` | High-priority scrub request preempts background prefetch within 5ms |
-| `TC-2.3-02` | Cache | Thread-safe LRU eviction under concurrent read/write | `Unit-2` | 0 race conditions under TSAN; evicted buffers released via `PrSDKPPixSuite` |
-| `TC-2.3-03` | Indexing | Binary search vs ring buffer lookup speed | `Unit-3` | Ring buffer retrieves keyframe packet offset in $< 50\,\mu\text{s}$ across 10,000 frames |
-| `TC-2.3-04` | Memory | Governor 50% physical RAM cap under stress | `Unit-4` | Cache memory throttles at precisely 50% of `GlobalMemoryStatusEx.ullAvailPhys` |
-| `TC-2.3-05` | Hardware | D3D11VA texture copy to Premiere system memory | `Unit-5` | NV12/P010 texture mapped and copied with 16-byte stride alignment |
-| `TC-2.3-06` | Vulkan | Vulkan Video session creation & decode loop | `Unit-6` | `vkGetVideoSessionMemoryRequirementsKHR` succeeds; AV1 decoded cleanly |
+| Test Case ID | Mapped AC | Owning Unit | Test Level | Input Vector | Expected Result & Pass Threshold |
+| :--- | :---: | :---: | :---: | :--- | :--- |
+| `TC-2.3.1` | `AC-1` | `unit-1` | Concurrency | `imCreateAsyncImporter` + 16 concurrent `AsyncImporterEntry` calls | 0 data races under TSan; `aiClose` cleans up worker pool |
+| `TC-2.3.2` | `AC-2` | `unit-2` | Unit | Repeated `imGetSourceVideo` for frame 42 | Cache hit via `PrSDKPPixCacheSuite` in $< 1\,\text{ms}$ |
+| `TC-2.3.3` | `AC-3` | `unit-3` | Benchmark / Unit | 10,000-frame Long-GOP + VFR seek sweep | Lookup $< 50\,\mu\text{s}$; scrub latency reduced by $\ge 15\%$ |
+| `TC-2.3.4` | `AC-4` | `unit-4` | Unit | Simulated 3 GB available RAM + `imQuietFile` selector | `outExtraMemoryUsage > 0`, `highMemUsage == kPrTrue`, cache $\le 1.5\text{ GB}$, `imQuietFile` frees handles |
+| `TC-2.3.5` | `AC-5` | `unit-5` | Unit | `d3d11va` / `nvdec` 10-bit `P010LE` surface + simulated failure | Maps 16-byte aligned surface; falls back cleanly to `dav1d` on error |
+| `TC-2.3.6` | `AC-5` | `unit-6` | Unit | FFmpeg 8.0 `vulkan` AV1 & VP9 decode session | Initializes Vulkan decode context or falls back cleanly on headless CI |
 
 ---
 
 ## 2. Technical Implementation Plan
 
-### 2.1 Domain Invariants, Data Models & Storage Schema
+### 2.1 Domain Invariants & Memory Accounting
+- **Adobe Async Importer Protocol**:
+  - Set `imImageInfoRec.supportsAsyncIO = kPrTrue` in `imGetInfo8`.
+  - Handle selector `imCreateAsyncImporter` by populating `imAsyncImporterCreationRec` with `AsyncImporterEntry` and `aiClose`.
+- **Adobe Memory Accounting & Quiet File Protocol**:
+  - Report per-instance decoder buffer footprint in `imOpenFileRec8.outExtraMemoryUsage`.
+  - Set `imFileInfoRec8.highMemUsage = kPrTrue` (instructs Premiere Pro to limit open high-memory instances to 5).
+  - Enforce dynamic ceiling: $\text{MaxCacheBytes} \le 0.50 \times \text{AvailablePhysicalRAM}$.
+  - Handle selector `imQuietFile` by closing OS file descriptors (`ICoreDemuxer::quietFile()`) and purging unpinned ring buffer frames.
 
-```cpp
-namespace OpenMedia::Importer::Caching {
-
-struct CachedFrame {
-    int64_t pts;
-    int64_t frameNumber;
-    PPixHand ppixHand;
-    size_t byteSize;
-    std::chrono::steady_clock::time_point lastAccess;
-    bool isPinned;
-};
-
-struct KeyframeEntry {
-    int64_t frameIndex;
-    int64_t pts;
-    int64_t fileByteOffset;
-    uint32_t packetSize;
-    bool isKeyframe;
-};
-
-enum class DecodeBackend {
-    SoftwareDav1d,
-    D3D11VA,
-    NVDEC,
-    VulkanVideo
-};
-
-} // namespace OpenMedia::Importer::Caching
-```
-
-### 2.2 Sequence Diagram: Frame Request & Async Cache Interplay
+### 2.2 Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Host as Premiere Pro (Host)
-    participant Entry as xImportEntry (imImportImage)
-    participant Cache as PPixLruCache
-    participant Prefetch as AsyncPrefetchEngine
-    participant HW as D3D11VA / Vulkan Decoder
-    participant Gov as MemoryGovernor
+    participant Entry as xImportEntry / AsyncImporterEntry (unit-1)
+    participant PPixCache as PPixCacheBridge (unit-2)
+    participant Ring as KeyframeRingBuffer (unit-3)
+    participant Gov as MemoryGovernor (unit-4)
+    participant HW as D3D11VA/NVDEC (unit-5) & Vulkan (unit-6)
 
-    Host->>Entry: imImportImage(time = T)
-    Entry->>Cache: QueryFrame(time = T)
-    alt Cache Hit
-        Cache-->>Entry: Return PPixHand (Immediate < 1ms)
+    Host->>Entry: xImportEntry(imCreateAsyncImporter)
+    Entry-->>Host: Register AsyncImporterEntry & aiClose
+    Host->>Entry: AsyncImporterEntry(imGetSourceVideo, frameTime)
+    Entry->>PPixCache: queryCache(frameTime)
+    alt Cache Hit in PrSDKPPixCacheSuite or RingBuffer
+        PPixCache-->>Entry: Return cached PPixHand (< 1ms)
         Entry-->>Host: imNoErr
-        Entry->>Prefetch: NotifyPlaybackDirection(Forward, rate = 1.0)
-    else Cache Miss (Scrub or Seek)
-        Entry->>Prefetch: RequestImmediateFrame(T, Priority::Urgent)
-        Prefetch->>HW: DecodePacket(PTS = T)
-        HW-->>Prefetch: AVFrame / D3D11 Texture
-        Prefetch->>Gov: CheckMemoryLimit(frameSize)
-        opt Memory Pressure > 50% Available
-            Gov->>Cache: EvictOldest(requiredBytes)
+    else Cache Miss (Random Timeline Scrub)
+        Entry->>Ring: findNearestKeyframe(frameTime)
+        Ring-->>Entry: Keyframe PTS & Byte Offset (< 50us)
+        Entry->>HW: decodeFrame(PTS, d3d11va / nvdec / vulkan -> fallback dav1d)
+        HW-->>Entry: RawVideoFrame (16-byte aligned)
+        Entry->>Gov: requestMemoryAllocation(frameBytes)
+        opt Usage > 50% Available Physical RAM
+            Gov->>Ring: evictOldestFrames()
         end
-        Prefetch->>Cache: StoreAndPin(T, PPixHand)
-        Cache-->>Entry: Return PPixHand
-        Entry-->>Host: imNoErr
-        Prefetch->>Prefetch: QueuePrefetchWindow(T + 1 ... T + 12)
+        Entry->>PPixCache: registerInPPixCacheSuite(PPixHand)
+        Entry-->>Host: Return *sourceVideoRec->outFrame (imNoErr)
+    end
+    opt Host Sends imQuietFile
+        Host->>Entry: xImportEntry(imQuietFile)
+        Entry->>Gov: handleQuietFile() -> close FDs & flush unpinned cache
     end
 ```
 
 ---
 
-## 3. Expected Folder Architecture at the Project
+## 3. Expected Folder Architecture
 
-```
-plugins/importer/
+```text
+AV1/
 ├── include/
-│   ├── OpenMedia_AsyncPrefetchEngine.h
-│   ├── OpenMedia_PPixLruCache.h
-│   ├── OpenMedia_KeyframeRingBuffer.h
-│   ├── OpenMedia_MemoryGovernor.h
-│   ├── OpenMedia_D3D11VaDecoder.h
-│   └── OpenMedia_VulkanVideoDecoder.h
+│   └── importer/
+│       ├── async_importer.hpp                   # Owned by unit-1
+│       ├── ppix_cache_bridge.hpp                # Owned by unit-2
+│       ├── keyframe_ring_buffer.hpp             # Owned by unit-3
+│       ├── memory_governor.hpp                  # Owned by unit-4
+│       ├── d3d11va_nvdec_decoder.hpp            # Owned by unit-5
+│       └── vulkan_video_decoder.hpp             # Owned by unit-6
 ├── src/
-│   ├── OpenMedia_AsyncPrefetchEngine.cpp
-│   ├── OpenMedia_PPixLruCache.cpp
-│   ├── OpenMedia_KeyframeRingBuffer.cpp
-│   ├── OpenMedia_MemoryGovernor.cpp
-│   ├── OpenMedia_D3D11VaDecoder.cpp
-│   └── OpenMedia_VulkanVideoDecoder.cpp
+│   └── importer/
+│       ├── async_importer.cpp                   # Owned by unit-1
+│       ├── ppix_cache_bridge.cpp                # Owned by unit-2
+│       ├── keyframe_ring_buffer.cpp             # Owned by unit-3
+│       ├── memory_governor.cpp                  # Owned by unit-4
+│       ├── d3d11va_nvdec_decoder.cpp            # Owned by unit-5
+│       └── vulkan_video_decoder.cpp             # Owned by unit-6
 └── tests/
-    ├── Test_AsyncPrefetchEngine.cpp
-    ├── Test_PPixLruCache.cpp
-    ├── Test_KeyframeRingBuffer.cpp
-    ├── Test_MemoryGovernor.cpp
-    ├── Test_D3D11VaDecoder.cpp
-    └── Test_VulkanVideoDecoder.cpp
+    └── importer/
+        ├── test_async_importer.cpp              # Owned by unit-1
+        ├── test_ppix_cache_bridge.cpp           # Owned by unit-2
+        ├── test_keyframe_ring_buffer.cpp        # Owned by unit-3
+        ├── test_memory_governor.cpp             # Owned by unit-4
+        ├── test_d3d11va_nvdec_decoder.cpp       # Owned by unit-5
+        └── test_vulkan_video_decoder.cpp        # Owned by unit-6
 ```
 
 ---
 
 ## 4. Implementation Units in Detail & Specialist Agent Assignment
 
-### 4.1 Unit Sizing Decision Matrix & Score Calculation
+### 4.1 Story Decomposition Score ($S_{\text{story}}$) & Dynamic Unit Count ($K$)
+- **$D_1$ (35% Surface)**: `3` (6 subsystems: `imCreateAsyncImporter`, `PrSDKPPixCacheSuite`, GOP RingBuffer, 50% RAM Governor + `imQuietFile`, D3D11VA/NVDEC, Vulkan Video)
+- **$D_2$ (25% Volume)**: `3` (~1,150 LOC C++17)
+- **$D_3$ (20% Complexity)**: `4` (Reentrant async selector safety, lock-free ring buffer, OS RAM telemetry, GPU surface mapping)
+- **$D_4$ (20% Boundaries)**: `3` (6 completely disjoint header/source/test triplets)
+- **Calculated Score**: $S_{\text{story}} = 0.35(3) + 0.25(3) + 0.20(4) + 0.20(3) = 1.05 + 0.75 + 0.80 + 0.60 = \mathbf{3.20} \to \mathbf{6\text{ Parallel Units}}$
 
-$$S_{\text{story}} = 0.35 D_1 + 0.25 D_2 + 0.20 D_3 + 0.20 D_4$$
-- $D_1 = 4$ (Async worker, PPix caching, Seek index ring buffer, RAM governor 50% cap, NVDEC/D3D11VA HW decode, Vulkan video decode)
-- $D_2 = 3$ (~1100 LOC across cache and hardware wrappers)
-- $D_3 = 3$ (Multi-threaded lock contention, atomics, HW surface interop)
-- $D_4 = 2$ (Prefetcher, cache, governor, HW decoders)
-$$S_{\text{story}} = (0.35 \times 4) + (0.25 \times 3) + (0.20 \times 3) + (0.20 \times 2) = 1.40 + 0.75 + 0.60 + 0.40 = 3.15 \implies K = 6$$
+### 4.2 Detailed Unit Specifications (`unit-1..6`)
 
-### 4.2 Dynamic $K$ Implementation Unit Specifications
+#### `unit-1` (`feat/us-2.3.0/unit-1-async-importer-engine`)
+- **Deliverable Scope**: `AsyncImporterEngine` handling selector `imCreateAsyncImporter`, reentrant entry point `AsyncImporterEntry`, teardown `aiClose`, and background lookahead frame prefetching for `imGetSourceVideo`. Includes `tests/importer/test_async_importer.cpp`.
+- **Owned Files**: `include/importer/async_importer.hpp`, `src/importer/async_importer.cpp`, `tests/importer/test_async_importer.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 1: Asynchronous Prefetch Worker & Priority Task Queue
-- **ID**: `unit-1`
-- **Branch**: `feat/us-2.3.0/unit-1-async-prefetch-engine`
-- **Objective**: Background thread worker pool that receives lookahead decode requests and supports priority preemption for rapid timeline scrubbing.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_AsyncPrefetchEngine.h`
-  - `plugins/importer/src/OpenMedia_AsyncPrefetchEngine.cpp`
-  - `plugins/importer/tests/Test_AsyncPrefetchEngine.cpp`
-- **Verification**: `ctest -R Test_AsyncPrefetchEngine` validates thread pool creation, queue prioritization, and cancelation on seek.
+#### `unit-2` (`feat/us-2.3.0/unit-2-ppix-cache-bridge`)
+- **Deliverable Scope**: `PPixCacheBridge` integrating Adobe's `PrSDKPPixCacheSuite` (`AddFrameToCache`, `GetFrameFromCache`) to cache decoded timeline frames and Media Browser thumbnails without redundant decoding. Includes `tests/importer/test_ppix_cache_bridge.cpp`.
+- **Owned Files**: `include/importer/ppix_cache_bridge.hpp`, `src/importer/ppix_cache_bridge.cpp`, `tests/importer/test_ppix_cache_bridge.cpp`.
+- **Target Complexity**: $CC \le 5$, nesting $\le 2$.
 
-#### Unit 2: Thread-Safe LRU PPix Hand Cache
-- **ID**: `unit-2`
-- **Branch**: `feat/us-2.3.0/unit-2-ppix-lru-cache`
-- **Objective**: Implements high-throughput, concurrent LRU cache storing Premiere Pro `PPixHand` pointers using reader-writer spinlocks or fine-grained mutexes.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_PPixLruCache.h`
-  - `plugins/importer/src/OpenMedia_PPixLruCache.cpp`
-  - `plugins/importer/tests/Test_PPixLruCache.cpp`
-- **Verification**: `ctest -R Test_PPixLruCache` executes 1,000 concurrent insert/lookup/eviction operations without deadlock or leak.
+#### `unit-3` (`feat/us-2.3.0/unit-3-keyframe-ring-buffer`)
+- **Deliverable Scope**: `KeyframeRingBuffer` maintaining an $O(\log N)$ sparse keyframe seek table (handling both CFR and VFR timestamps) and a circular decoded-frame Ring Buffer delivering 5%–20% faster timeline scrubbing. Includes `tests/importer/test_keyframe_ring_buffer.cpp`.
+- **Owned Files**: `include/importer/keyframe_ring_buffer.hpp`, `src/importer/keyframe_ring_buffer.cpp`, `tests/importer/test_keyframe_ring_buffer.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 3: Keyframe Index & Packet Ring Buffer
-- **ID**: `unit-3`
-- **Branch**: `feat/us-2.3.0/unit-3-keyframe-ring-buffer`
-- **Objective**: High-speed sparse index recording keyframe file offsets and presentation timestamps, with a ring buffer for recent demuxed packets.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_KeyframeRingBuffer.h`
-  - `plugins/importer/src/OpenMedia_KeyframeRingBuffer.cpp`
-  - `plugins/importer/tests/Test_KeyframeRingBuffer.cpp`
-- **Verification**: `ctest -R Test_KeyframeRingBuffer` verifies $O(1)$ ring buffer enqueue/dequeue and $< 50\,\mu\text{s}$ keyframe seek indexing.
+#### `unit-4` (`feat/us-2.3.0/unit-4-memory-governor-quiet`)
+- **Deliverable Scope**: `MemoryGovernor` querying OS available physical RAM (`GlobalMemoryStatusEx` / `sysctl`), enforcing the strict 50% available RAM cap, populating `imOpenFileRec8.outExtraMemoryUsage` and `imFileInfoRec8.highMemUsage = kPrTrue`, and handling selector `imQuietFile`. Includes `tests/importer/test_memory_governor.cpp`.
+- **Owned Files**: `include/importer/memory_governor.hpp`, `src/importer/memory_governor.cpp`, `tests/importer/test_memory_governor.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 4: Dynamic Memory Governor (50% Physical RAM Ceiling)
-- **ID**: `unit-4`
-- **Branch**: `feat/us-2.3.0/unit-4-memory-governor`
-- **Objective**: System-wide physical memory monitor querying OS APIs (`GlobalMemoryStatusEx` on Windows, `sysctl` on macOS) to enforce strict 50% allocation cap.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_MemoryGovernor.h`
-  - `plugins/importer/src/OpenMedia_MemoryGovernor.cpp`
-  - `plugins/importer/tests/Test_MemoryGovernor.cpp`
-- **Verification**: `ctest -R Test_MemoryGovernor` verifies hard cap enforcement under simulated low-memory system environments.
+#### `unit-5` (`feat/us-2.3.0/unit-5-d3d11va-nvdec-decoder`)
+- **Deliverable Scope**: `D3D11VaNvdecDecoder` wrapping FFmpeg `d3d11va` and `nvdec` hardware acceleration (`AV_PIX_FMT_D3D11` / `NV12` / `P010LE` transfer to 16-byte aligned system memory) with automatic fallback to `libdav1d` / `libvpx`. Includes `tests/importer/test_d3d11va_nvdec_decoder.cpp`.
+- **Owned Files**: `include/importer/d3d11va_nvdec_decoder.hpp`, `src/importer/d3d11va_nvdec_decoder.cpp`, `tests/importer/test_d3d11va_nvdec_decoder.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 5: D3D11VA & NVDEC Hardware Decode Accelerator
-- **ID**: `unit-5`
-- **Branch**: `feat/us-2.3.0/unit-5-d3d11va-nvdec-decoder`
-- **Objective**: Hardware decoder pipeline utilizing Direct3D 11 Video Acceleration and NVIDIA NVDEC for hardware AV1 / VP9 10-bit decoding.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_D3D11VaDecoder.h`
-  - `plugins/importer/src/OpenMedia_D3D11VaDecoder.cpp`
-  - `plugins/importer/tests/Test_D3D11VaDecoder.cpp`
-- **Verification**: `ctest -R Test_D3D11VaDecoder` verifies D3D11 device creation, hwaccel context initialization, and texture readback.
+#### `unit-6` (`feat/us-2.3.0/unit-6-vulkan-video-decoder`)
+- **Deliverable Scope**: `VulkanVideoDecoder` leveraging FFmpeg 8.0 Vulkan Video (`VK_KHR_video_decode_av1` and `VK_KHR_video_decode_vp9`) for cross-vendor GPU decoding with graceful fallback to CPU software decoding. Includes `tests/importer/test_vulkan_video_decoder.cpp`.
+- **Owned Files**: `include/importer/vulkan_video_decoder.hpp`, `src/importer/vulkan_video_decoder.cpp`, `tests/importer/test_vulkan_video_decoder.cpp`.
+- **Target Complexity**: $CC \le 6$, nesting $\le 2$.
 
-#### Unit 6: Vulkan Video Decode Accelerator
-- **ID**: `unit-6`
-- **Branch**: `feat/us-2.3.0/unit-6-vulkan-video-decoder`
-- **Objective**: Modern cross-platform hardware decoding backend via `VK_KHR_video_decode_av1` and `VK_KHR_video_decode_queue`.
-- **Files Owned**:
-  - `plugins/importer/include/OpenMedia_VulkanVideoDecoder.h`
-  - `plugins/importer/src/OpenMedia_VulkanVideoDecoder.cpp`
-  - `plugins/importer/tests/Test_VulkanVideoDecoder.cpp`
-- **Verification**: `ctest -R Test_VulkanVideoDecoder` initializes Vulkan instance, enumerates physical devices, and validates decode profile compatibility.
+### 4.3 Best-Fit Specialist Agents per Unit
 
-### 4.3 Specialist Agent Assignment
-
-| Unit | Subagent Type | Specialist Role |
-| :--- | :--- | :--- |
-| `unit-1` | `agency-realtime-collaboration-engineer` | Concurrency & Worker Queue Specialist |
-| `unit-2` | `agency-minimal-change-engineer` | Memory & LRU Cache Architect |
-| `unit-3` | `agency-developer-tooling-engineer` | Data Structures & Indexing Specialist |
-| `unit-4` | `agency-sre` | Resource Governor & Memory Budgeting Specialist |
-| `unit-5` | `agency-desktop-app-engineer` | Windows Graphics & D3D11VA/NVDEC Specialist |
-| `unit-6` | `agency-video-streaming-engineer` | Vulkan Video & Low-Level Codec Specialist |
-
-### 4.4 Shared Base Contract & Seeding Plan
-- Core data structures (`CachedFrame`, `KeyframeEntry`, `DecodeBackend`) are defined in `OpenMedia_CachingTypes.h` under `OpenMediaCore`.
-- All units consume the shared base contract without circular header dependencies.
+| Unit ID | Branch Name | Primary Implementer Agent | Reviewing Council Agents | Mandatory Skills Enforced |
+| :--- | :--- | :--- | :--- | :--- |
+| `unit-1` | `feat/us-2.3.0/unit-1-async-importer-engine` | `realtime-collaboration-engineer` | `code-reviewer`, `security-architect` | `code-review-council`, `security-audit` |
+| `unit-2` | `feat/us-2.3.0/unit-2-ppix-cache-bridge` | `minimal-change-engineer` | `code-reviewer`, `performance-benchmarker` | `code-review-council`, `cyclomatic-complexity` |
+| `unit-3` | `feat/us-2.3.0/unit-3-keyframe-ring-buffer` | `developer-tooling-engineer` | `code-reviewer`, `performance-benchmarker` | `code-review-council`, `cyclomatic-complexity` |
+| `unit-4` | `feat/us-2.3.0/unit-4-memory-governor-quiet` | `sre` | `code-reviewer`, `security-architect` | `code-review-council`, `security-audit` |
+| `unit-5` | `feat/us-2.3.0/unit-5-d3d11va-nvdec-decoder` | `desktop-app-engineer` | `code-reviewer`, `test-automation-engineer` | `code-review-council`, `security-audit` |
+| `unit-6` | `feat/us-2.3.0/unit-6-vulkan-video-decoder` | `video-streaming-engineer` | `code-reviewer`, `reality-checker` | `code-review-council`, `cyclomatic-complexity` |
+| **Patch** | `patch/us-2.3.0-<scope>` | `patch-implementer` | `code-reviewer-council-president` | Full Gate Verification |
 
 ---
 
-## 5. Security Gateway powered by `security-audit`
+## 5. Security Gateway (`security-audit`)
 
-### 5.1 Trust Boundaries & Actors
-- **Untrusted Source**: Malformed bitstreams designed to trigger heap exhaustion or lock inversion in the caching subsystem.
-- **Trust Boundary**: GPU device drivers (D3D11/Vulkan user-mode drivers). Unchecked GPU command buffers can trigger host system crashes (BSOD / TDR).
-
-### 5.2 STRIDE Threat Matrix & ASVS 5.0 Controls
-
-| Threat Category | Scenario | Mitigation / ASVS 5.0 Control |
-| :--- | :--- | :--- |
-| **Denial of Service** | Unbounded memory allocation via micro-GOP video spam | Strict 50% physical RAM cap enforced by `MemoryGovernor` (ASVS V14.2.1) |
-| **Tampering** | Concurrency race condition corrupting `PPixHand` ref counts | Reader-writer mutex guarding cache nodes; atomic ref counting |
-| **Elevation of Privilege** | Arbitrary memory write via out-of-bounds GPU texture mapping | Bounds-checked surface lock and stride verification before copy |
-| **Information Disclosure** | Uninitialized memory retained in reused `PPixHand` buffers | Explicit `memset(0)` or full buffer overwrite on newly allocated surfaces |
-
-### 5.3 Global Cryptographic, Jurisdictional & Data Protection Controls
-- Conforms to safe memory isolation standards under ISO/IEC 27001. No telemetry or frame buffers leaked to network sockets or unencrypted disk scratchpad.
-
-### 5.4 Automated Security Verification Checklist
-- [x] ASAN / TSAN concurrency build verification passes with zero data races.
-- [x] Memory limit stress test verifies emergency eviction loop executes without throwing `std::bad_alloc`.
-- [x] GPU hardware fallback test confirms driver crash simulation does not crash Premiere host process.
-
-### 5.5 Gate G2 Sign-Off Checklist
-- [x] All mutex locks use RAII `std::unique_lock` or `std::shared_lock` with deadlock avoidance ordering.
-- [x] 0 static analysis defects flagged by Clang-Tidy or MSVC Code Analysis (/analyze).
+| Threat ID | STRIDE | ASVS / CWE | Attack Scenario | Impact | Mitigation Control |
+| :--- | :---: | :---: | :--- | :---: | :--- |
+| `TM-2.3.1` | **D**enial of Service | CWE-400 | Unbounded cache growth crashing Premiere Pro on 8K timelines | Critical | `MemoryGovernor` enforces 50% available RAM cap + `highMemUsage = kPrTrue` + `imQuietFile` eviction |
+| `TM-2.3.2` | **T**ampering | CWE-362 | Race condition between `AsyncImporterEntry` worker threads and `aiClose` | High | Scoped reader-writer locks and atomic cancellation barrier in `aiClose` |
+| `TM-2.3.3` | **D**enial of Service | CWE-755 | GPU driver reset (TDR) during `d3d11va`/`vulkan` decode | High | Catch hardware decode error code and transparently demote stream to `libdav1d` CPU worker |
 
 ---
 
 ## 6. Validation Gates & Acceptance Sign-Off
 
-| Gate | Criterion | Verification Command | Pass Condition |
-| :--- | :--- | :--- | :--- |
-| **Gate G0** | Compilation & Formatter | `cmake --build --preset windows-x64-release` | 0 errors, 0 warnings, clang-format clean |
-| **Gate G1** | Verification Coverage | `ctest --preset windows-x64-release` | 100% unit tests pass; line coverage $\ge 90\%$ |
-| **Gate G2** | Security Audit | `scripts/security-audit-scan.sh --target caching` | 0 high/critical issues, 0 race conditions |
-| **Gate G-Complexity** | Cyclomatic Complexity | `python scripts/check-complexity.py plugins/importer` | $CC \le 6$ target, $CC \le 10$ max ceiling |
-| **Gate G-Docs** | API Documentation | Doxygen documentation extraction | 100% public functions documented |
-| **Gate G-Review** | Independent Council | GitHub PR Conversation Sign-Off | Approval comment from Code Reviewer Council |
+| Gate | Gate Name | Pass Criteria | Verification Evidence | Status |
+| :--- | :--- | :--- | :--- | :---: |
+| **Gate G0** | Build & Lint | 0 compiler warnings, `clang-format` clean | `cmake --build build` exit 0 | `[ ]` |
+| **Gate G1** | Tests & Traceability | `TC-2.3.1` .. `TC-2.3.6` pass 100% | `ctest -R test_async_importer|test_ppix_cache_bridge|test_keyframe_ring_buffer|test_memory_governor|test_d3d11va_nvdec_decoder|test_vulkan_video_decoder` | `[ ]` |
+| **Gate G2** | Security Gateway | TSan & ASan 0 race conditions or leaks | `security-audit` report on PR | `[ ]` |
+| **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
+| **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 6 headers | Doxygen build clean | `[ ]` |
+| **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
