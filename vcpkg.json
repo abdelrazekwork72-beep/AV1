@@ -1,1 +1,28 @@
-{}
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "openmedia-premiere-plugin",
+  "version-string": "1.0.0",
+  "license": "MIT AND LGPL-2.1-or-later",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "version>=": "7.1.0",
+      "default-features": false,
+      "features": [
+        "avcodec",
+        "avformat",
+        "swscale",
+        "swresample",
+        "avutil",
+        "dav1d",
+        "svtav1",
+        "vpx",
+        "opus",
+        "flac",
+        "nvcodec",
+        "vulkan"
+      ]
+    }
+  ],
+  "builtin-baseline": "382a945938bf804c0ecdd61c94297b7b2de2dc3b"
+}
