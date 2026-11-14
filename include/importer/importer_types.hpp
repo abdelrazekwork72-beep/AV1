@@ -71,7 +71,7 @@ inline constexpr csSDK_int32 kPPixBufferAccessReadOnly = 0;
 /// @brief Extended pixel format constants for 10/12-bit HDR and alpha negotiation.
 inline constexpr csSDK_uint32 kPixFmtBGRA4444_8u = PrPixelFormat_BGRA_4444_8u;
 inline constexpr csSDK_uint32 kPixFmtVUYA4444_8u = PrPixelFormat_VUYA_4444_8u;
-inline constexpr csSDK_uint32 kPixFmtYUV420Planar_8u_709 = PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709;
+inline constexpr csSDK_uint32 kPixFmtYUV420Planar_8u_709 = PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u;
 inline constexpr csSDK_uint32 kPixFmtRGB444_10u = PrPixelFormat_RGB_444_10u;
 inline constexpr csSDK_uint32 kPixFmtUYVY422_32f = 0x55593332U;
 inline constexpr csSDK_uint32 kPixFmtBGRA4444_32f_Linear = 0x42473332U;
