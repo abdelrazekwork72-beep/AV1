@@ -23,6 +23,12 @@ if(NOT CPACK_WIX_INSTALL_SCOPE STREQUAL "perMachine")
     message(FATAL_ERROR "Expected perMachine WiX scope for CWE-732 protection")
 endif()
 
+foreach(req_bin IN ITEMS "OpenMedia_Importer.prm" "OpenMedia_Exporter.prm" "libOpenMediaCore.dll")
+    if(NOT "${req_bin}" IN_LIST OPENMEDIA_WINDOWS_ARTIFACTS)
+        message(FATAL_ERROR "Missing Windows artifact in OPENMEDIA_WINDOWS_ARTIFACTS: ${req_bin}")
+    endif()
+endforeach()
+
 file(READ "${wix_patch}" wix_content)
 if(NOT wix_content MATCHES "ALLUSERS" OR NOT wix_content MATCHES "Privileged")
     message(FATAL_ERROR "wix_patch.xml missing Administrator/ALLUSERS enforcement")

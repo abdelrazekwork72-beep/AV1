@@ -1,9 +1,12 @@
 {
   "moduleId": "module-4-integration-qa",
   "title": "Module 4: System Integration, Host Harness & Packaging",
-  "branch": "feat/module-4-integration-qa",
+  "branch": "feat/module-4-integration-qa-synced",
   "baseBranch": "main",
-  "updatedAt": "2026-11-14T12:28:00Z",
+  "prNumber": 69,
+  "mergedSha": "7ed57b9a6aa78b7bdf46b6496c46fbdf3c3b4f99",
+  "remediationBranch": "patch/module-4-cycle-review",
+  "updatedAt": "2026-11-14T12:52:00Z",
   "items": {
     "us-4.1.0": {
       "status": "Merged",

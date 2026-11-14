@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <CPackWiXPatch>
   <CPackWiXFragment Id="#PRODUCT">
     <!-- Enforce Administrator/perMachine ACLs (TM-4.2.1 / CWE-732) and silent /qn support -->

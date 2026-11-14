@@ -240,11 +240,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
     target_include_directories(openmedia_integration_harness PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks/mock_sdk/Examples/Headers"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks/mock_sdk/Examples/Utils"
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
-    if(UNIX AND NOT APPLE)
-        target_link_libraries(openmedia_integration_harness PUBLIC ${CMAKE_DL_LIBS})
-    endif()
+    target_link_libraries(openmedia_integration_harness PUBLIC
+        OpenMedia_Importer_obj
+        OpenMedia_Exporter_obj
+        OpenMediaCore
+        ${CMAKE_DL_LIBS}
+    )
     openmedia_apply_warnings(openmedia_integration_harness)
     foreach(integ_test IN ITEMS
         test_deployment_validator
@@ -253,14 +257,38 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
     )
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/${integ_test}.cpp")
             add_executable("${integ_test}" "tests/integration/${integ_test}.cpp")
-            target_link_libraries("${integ_test}" PRIVATE openmedia_integration_harness OpenMediaCore)
+            target_link_libraries("${integ_test}" PRIVATE
+                openmedia_integration_harness
+                OpenMedia_Importer_obj
+                OpenMedia_Exporter_obj
+                OpenMediaCore
+                ${CMAKE_DL_LIBS}
+            )
             openmedia_apply_warnings("${integ_test}")
-            add_test(NAME "${integ_test}" COMMAND "${integ_test}")
+            if("${integ_test}" STREQUAL "test_deployment_validator")
+                add_test(
+                    NAME "${integ_test}"
+                    COMMAND "${integ_test}"
+                        "$<TARGET_FILE:OpenMedia_Importer>"
+                        "$<TARGET_FILE:OpenMedia_Exporter>"
+                )
+            else()
+                add_test(NAME "${integ_test}" COMMAND "${integ_test}")
+            endif()
         endif()
     endforeach()
 endif()
 
 # Module 4: Cross-Platform CPack Packaging & License Audit (US-4.2.0)
+install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_Exporter
+    RUNTIME DESTINATION .
+    LIBRARY DESTINATION .
+    BUNDLE DESTINATION .
+)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md" DESTINATION .)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_windows_cpack.cmake")
     add_test(
         NAME test_windows_cpack

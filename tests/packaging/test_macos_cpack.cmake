@@ -19,6 +19,12 @@ if(NOT OPENMEDIA_MACOS_MEDIACORE_DIR STREQUAL "/Library/Application Support/Adob
     message(FATAL_ERROR "Invalid macOS MediaCore 7.0 target path: ${OPENMEDIA_MACOS_MEDIACORE_DIR}")
 endif()
 
+foreach(req_bin IN ITEMS "OpenMedia_Importer.bundle" "OpenMedia_Exporter.bundle" "libOpenMediaCore.dylib")
+    if(NOT "${req_bin}" IN_LIST OPENMEDIA_MACOS_ARTIFACTS)
+        message(FATAL_ERROR "Missing macOS artifact in OPENMEDIA_MACOS_ARTIFACTS: ${req_bin}")
+    endif()
+endforeach()
+
 file(READ "${post_sh}" post_content)
 if(NOT post_content MATCHES "set -euo pipefail")
     message(FATAL_ERROR "postinstall.sh missing 'set -euo pipefail'")
