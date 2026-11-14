@@ -1,18 +1,59 @@
 {
   "moduleId": "module-4-integration-qa",
-  "title": "Module 4: Integration, Packaging & QA",
-  "githubProjectNumber": null,
-  "updatedAt": "2026-11-14T06:03:38Z",
+  "title": "Module 4: System Integration, Host Harness & Packaging",
+  "branch": "feat/module-4-integration-qa",
+  "baseBranch": "main",
+  "updatedAt": "2026-11-14T12:25:00Z",
   "items": {
-    "US-4.1.0": {
-      "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:38Z",
-      "branch": "feat/us-4.1.0-mediacore-host-integration-harness"
+    "us-4.1.0": {
+      "status": "In Progress",
+      "branch": "feat/us-4.1.0-mediacore-host-integration-harness",
+      "prNumber": null,
+      "mergedSha": null,
+      "unitCount": 3
     },
-    "US-4.2.0": {
+    "us-4.1.0/unit-1": {
       "status": "Todo",
-      "updatedAt": "2026-11-14T06:03:38Z",
-      "branch": "feat/us-4.2.0-cpack-distribution-packaging"
+      "branch": "feat/us-4.1.0/unit-1-deployment-validator",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "us-4.1.0/unit-2": {
+      "status": "Todo",
+      "branch": "feat/us-4.1.0/unit-2-scrub-latency-benchmark",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "us-4.1.0/unit-3": {
+      "status": "Todo",
+      "branch": "feat/us-4.1.0/unit-3-ame-harness-cache-purge",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "us-4.2.0": {
+      "status": "In Progress",
+      "branch": "feat/us-4.2.0-cpack-distribution-packaging",
+      "prNumber": null,
+      "mergedSha": null,
+      "unitCount": 3
+    },
+    "us-4.2.0/unit-1": {
+      "status": "Todo",
+      "branch": "feat/us-4.2.0/unit-1-windows-msi-installer",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "us-4.2.0/unit-2": {
+      "status": "Todo",
+      "branch": "feat/us-4.2.0/unit-2-macos-pkg-installer",
+      "prNumber": null,
+      "mergedSha": null
+    },
+    "us-4.2.0/unit-3": {
+      "status": "Todo",
+      "branch": "feat/us-4.2.0/unit-3-license-compliance-packager",
+      "prNumber": null,
+      "mergedSha": null
     }
   }
 }
