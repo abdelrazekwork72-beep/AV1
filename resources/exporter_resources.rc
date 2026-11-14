@@ -1,0 +1,9 @@
+// OpenMedia Exporter Windows Resource Script
+#include <windows.h>
+
+1001 RCDATA
+BEGIN
+    "OpenMedia_Exporter\0",
+    "xSDKExport\0",
+    "1.0.0.0\0"
+END
