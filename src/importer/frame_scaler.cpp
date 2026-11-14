@@ -95,15 +95,9 @@ struct YuvRgbCoeffs {
 };
 
 YuvRgbCoeffs getFallbackCoeffs(ColorMatrix matrix) noexcept {
-    switch (matrix) {
-        case ColorMatrix::Rec601:
-            return {1436, 352, 731, 1815};
-        case ColorMatrix::Rec2020:
-            return {1510, 169, 585, 1927};
-        case ColorMatrix::Rec709:
-        default:
-            return {1612, 192, 479, 1900};
-    }
+    if (matrix == ColorMatrix::Rec601) return {1436, 352, 731, 1815};
+    if (matrix == ColorMatrix::Rec2020) return {1510, 169, 585, 1927};
+    return {1612, 192, 479, 1900};
 }
 
 void writeFallbackPixel(uint8_t* dstPixel,
@@ -370,41 +364,23 @@ ColorMatrix FrameScaler::activeColorMatrix() const noexcept {
 }
 
 ColorMatrix FrameScaler::mapColorSpace(openmedia::ColorSpace space) noexcept {
-    switch (space) {
-        case openmedia::ColorSpace::BT601:
-            return ColorMatrix::Rec601;
-        case openmedia::ColorSpace::BT2020_NCL:
-        case openmedia::ColorSpace::BT2020_CL:
-            return ColorMatrix::Rec2020;
-        case openmedia::ColorSpace::BT709:
-        case openmedia::ColorSpace::Unspecified:
-        default:
-            return ColorMatrix::Rec709;
+    if (space == openmedia::ColorSpace::BT601) return ColorMatrix::Rec601;
+    if (space == openmedia::ColorSpace::BT2020_NCL || space == openmedia::ColorSpace::BT2020_CL) {
+        return ColorMatrix::Rec2020;
     }
+    return ColorMatrix::Rec709;
 }
 
 int FrameScaler::toSwsColorspaceId(ColorMatrix matrix) noexcept {
-    switch (matrix) {
-        case ColorMatrix::Rec601:
-            return kSwsCsItu601;
-        case ColorMatrix::Rec2020:
-            return kSwsCsBt2020;
-        case ColorMatrix::Rec709:
-        default:
-            return kSwsCsItu709;
-    }
+    if (matrix == ColorMatrix::Rec601) return kSwsCsItu601;
+    if (matrix == ColorMatrix::Rec2020) return kSwsCsBt2020;
+    return kSwsCsItu709;
 }
 
 std::array<int, 4> FrameScaler::getMatrixCoefficients(ColorMatrix matrix) noexcept {
-    switch (matrix) {
-        case ColorMatrix::Rec601:
-            return {104597, 132201, 25675, 53279};
-        case ColorMatrix::Rec2020:
-            return {117504, 148078, 13954, 46750};
-        case ColorMatrix::Rec709:
-        default:
-            return {117489, 138438, 13975, 34925};
-    }
+    if (matrix == ColorMatrix::Rec601) return {104597, 132201, 25675, 53279};
+    if (matrix == ColorMatrix::Rec2020) return {117504, 148078, 13954, 46750};
+    return {117489, 138438, 13975, 34925};
 }
 
 } // namespace openmedia::importer

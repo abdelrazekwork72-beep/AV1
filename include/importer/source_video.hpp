@@ -3,10 +3,6 @@
 /// @brief MediaCore `imGetSourceVideo` handler and `PPixHand` allocation bridge for US-2.2.0 Unit 1.
 
 #include "PrSDKPixelFormat.h"
-#ifndef PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709
-#define PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709 \
-    PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u
-#endif
 
 #include "PrSDKPPixCreatorSuite.h"
 #include "importer/importer_types.hpp"
