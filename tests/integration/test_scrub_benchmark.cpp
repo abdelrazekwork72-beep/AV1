@@ -4,29 +4,15 @@
 #include "scrub_benchmark.hpp"
 
 #include <cassert>
-#include <chrono>
-#include <cstdint>
 #include <iostream>
-#include <thread>
 
 int main() {
-    alignas(16) std::uint8_t alignedFrameBuffer[64]{};
     openmedia::integration::ScrubLatencyBenchmark bench;
 
-    // Simulate AsyncImporterEntry(imGetSourceVideo) with GOP RingBuffer cache speedup (~15%)
-    const auto fetchFn = [&alignedFrameBuffer](std::int64_t /*frameIndex*/,
-                                               bool useRingBufferCache,
-                                               void** outAlignedPPix) -> bool {
-        const auto delayUs = useRingBufferCache ? 800 : 1000;
-        std::this_thread::sleep_for(std::chrono::microseconds(delayUs));
-        if (outAlignedPPix) {
-            *outAlignedPPix = alignedFrameBuffer;
-        }
-        return true;
-    };
-
-    const auto report = bench.runScrubBenchmark(3600, 200, fetchFn);
+    // 1. Default 200-seek pipeline benchmark exercising AsyncImporterEngine, KeyframeRingBuffer, and PPixCacheBridge
+    const auto report = bench.runDefaultPipelineBenchmark(200);
     assert(report.seekCount == 200);
+    assert(report.asyncSelectorVerified);
     assert(report.p50Ms < 25.0);
     assert(report.p95Ms < 50.0);
     assert(report.ringBufferSpeedupPct >= 5.0);
@@ -34,8 +20,14 @@ int main() {
     assert(!report.watchdogTimedOut);
     assert(report.meetsSla());
 
-    std::cout << "[PASS] TC-4.1.2 ScrubLatencyBenchmark: p50=" << report.p50Ms
-              << "ms, p95=" << report.p95Ms
-              << "ms, speedup=" << report.ringBufferSpeedupPct << "%\n";
+    // 2. Watchdog failure / error propagation check (TM-4.1.2)
+    const auto failReport = bench.runScrubBenchmark(
+        100, 10, [](std::int64_t, bool, void**) { return false; });
+    assert(failReport.watchdogTimedOut);
+    assert(!failReport.meetsSla());
+
+    std::cout << "[PASS] TC-4.1.2 ScrubLatencyBenchmark: seeks=" << report.seekCount
+              << ", p50=" << report.p50Ms << "ms, p95=" << report.p95Ms
+              << "ms, speedup=" << report.ringBufferSpeedupPct << "%" << std::endl;
     return 0;
 }

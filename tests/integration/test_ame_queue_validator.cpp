@@ -11,6 +11,7 @@
 int main() {
     namespace fs = std::filesystem;
     const fs::path tempDir = fs::temp_directory_path() / "openmedia_ame_test_cache";
+    fs::remove_all(tempDir);
     fs::create_directories(tempDir);
 
     // Seed whitelisted stale AME files AND an unrelated user preset that MUST NOT be deleted
@@ -19,26 +20,21 @@ int main() {
     { std::ofstream(tempDir / "UserCustomPreset.epr") << "keep"; }
 
     openmedia::integration::AmeQueueValidator validator;
-    const auto runner = [](const openmedia::integration::AmeExportJob& job,
-                           std::vector<std::uint8_t>& outBytes) -> bool {
-        if (job.containerExt == ".mkv" || job.containerExt == ".webm") {
-            outBytes = {0x1A, 0x45, 0xDF, 0xA3, 0x01};
-        } else if (job.containerExt == ".opus") {
-            outBytes = {'O', 'g', 'g', 'S', 0x00};
-        } else if (job.containerExt == ".flac") {
-            outBytes = {'f', 'L', 'a', 'C', 0x00};
-        }
-        return !outBytes.empty();
-    };
+    const auto report = validator.runDefaultBatchPipeline(tempDir);
 
-    const auto report = validator.runBatchQueueValidation(tempDir, runner);
     assert(report.purgedFileCount == 2);
     assert(!fs::exists(tempDir / "Placeholder Preset.epr"));
     assert(!fs::exists(tempDir / "batch.xml"));
     assert(fs::exists(tempDir / "UserCustomPreset.epr"));
+    assert(report.completedJobs == 5);
+    assert(report.failedJobs == 0);
+    assert(report.allContainersValid);
+    assert(report.demuxerProbesPassed);
+    assert(report.memoryDeltaMb < 50.0);
     assert(report.passed());
 
     fs::remove_all(tempDir);
-    std::cout << "[PASS] TC-4.1.3 AmeQueueValidator purged 2 stale caches and passed 5-job batch.\n";
+    std::cout << "[PASS] TC-4.1.3 AmeQueueValidator purged 2 stale caches, verified 5 containers with CoreDemuxer, "
+              << "RSS delta=" << report.memoryDeltaMb << "MB (< 50MB)." << std::endl;
     return 0;
 }

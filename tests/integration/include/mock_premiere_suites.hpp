@@ -14,10 +14,17 @@
 #include "PrSDKTypes.h"
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
 #include <vector>
+
+/// @brief Minimal clean-room exportStdParms definition matching Adobe MediaCore Exporter ABI.
+struct exportStdParms {
+    csSDK_int32 exInterfaceVer = 1;
+    SPBasicSuite* spBasic = nullptr;
+};
 
 namespace openmedia::integration {
 
@@ -34,21 +41,26 @@ using ExportEntryFn = csSDK_int32 (*)(csSDK_int32 selector,
 
 /// @brief Minimal SweetPea SPBasicSuite mock for headless host suite acquisition.
 struct MockSPBasicSuite {
-    std::map<std::string, const void*> suites;
+    SPBasicSuite base{};
 
-    static csSDK_int32 acquireSuite(const char* name,
-                                    csSDK_int32 /*version*/,
-                                    const void** suiteOut) noexcept {
-        if (!name || !suiteOut) {
-            return -1;
+    static prSuiteError acquireSuite(const char* name,
+                                     csSDK_int32 /*version*/,
+                                     const void** suiteOut) noexcept {
+        if (name == nullptr || suiteOut == nullptr) {
+            return suiteError_InvalidParms;
         }
         *suiteOut = nullptr;
-        return 0;
+        return suiteError_NoError;
     }
 
-    static csSDK_int32 releaseSuite(const char* /*name*/,
-                                    csSDK_int32 /*version*/) noexcept {
-        return 0;
+    static prSuiteError releaseSuite(const char* name,
+                                     csSDK_int32 /*version*/) noexcept {
+        return (name != nullptr) ? suiteError_NoError : suiteError_InvalidParms;
+    }
+
+    MockSPBasicSuite() noexcept {
+        base.AcquireSuite = &acquireSuite;
+        base.ReleaseSuite = &releaseSuite;
     }
 };
 
@@ -63,11 +75,21 @@ struct MockPremiereHost {
     PrSDKPPixCacheSuite ppixCacheSuite{};
     PrSDKAudioSuite audioSuite{};
 
+    static void* mockNewPtr(csSDK_uint32 byteCount) noexcept {
+        return std::calloc(1U, byteCount == 0U ? 1U : byteCount);
+    }
+
+    static void mockDisposePtr(void* ptr) noexcept {
+        std::free(ptr);
+    }
+
     MockPremiereHost() noexcept {
-        std::memset(&importerStdParms, 0, sizeof(importerStdParms));
-        std::memset(&exporterStdParms, 0, sizeof(exporterStdParms));
-        importerStdParms.piSuites = nullptr;
-        exporterStdParms.spBasic = &basicSuite;
+        importerStdParms.imInterfaceVer = 1;
+        importerStdParms.piSuites = &basicSuite.base;
+        exporterStdParms.exInterfaceVer = 1;
+        exporterStdParms.spBasic = &basicSuite.base;
+        memorySuite.NewPtr = &mockNewPtr;
+        memorySuite.PrDisposePtr = &mockDisposePtr;
     }
 };
 
