@@ -10,10 +10,6 @@
 #define PREMPLUGENTRY csSDK_int32
 #endif
 
-#ifndef PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709
-/// @brief Fallback alias when mock SDK PrSDKPixelFormat.h omits the _709 enumerator.
-#define PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709 PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u
-#endif
 
 #include "importer/importer_types.hpp"
 

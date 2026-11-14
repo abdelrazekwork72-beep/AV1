@@ -3,10 +3,6 @@
 /// @brief 8-bit pixel format negotiation and WebM YUVA420P-to-BGRA8 packing engine for Module 2 (US-2.2.0 Unit 2).
 
 #include "PrSDKPixelFormat.h"
-#ifndef PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709
-#define PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u_709 \
-    PrPixelFormat_YUV_420_MPEG4_FIELD_PICTURE_PLANAR_8u
-#endif
 #include "importer/importer_types.hpp"
 
 #include <cstdint>

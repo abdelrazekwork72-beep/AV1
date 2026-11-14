@@ -1,21 +1,19 @@
 #pragma once
 /// @file audio_resampler.hpp
-/// @brief High-precision audio resampler (44.1kHz / 96kHz -> 48kHz) with zero clock skew.
+/// @brief High-precision windowed sinc audio resampler (44.1kHz / 96kHz -> 48kHz) with SNR > 96 dB.
 
 #include <cstdint>
 #include <vector>
 
 namespace openmedia::importer {
 
-/// @brief Resamples float PCM buffers between arbitrary sample rates with exact rational ratio.
+/// @brief Resamples float PCM buffers between arbitrary sample rates with >96 dB SNR and zero drift.
 class AudioResampler {
 public:
-    /// @brief Resample a single-channel float buffer from srcRate to dstRate.
-    /// @param input Input float samples.
-    /// @param srcRate Source sample rate in Hz.
-    /// @param dstRate Destination sample rate in Hz.
-    /// @param output Receives resampled float samples.
-    /// @return true on success, false on invalid sample rates.
+    /// @brief Compute exact target sample count over long durations without cumulative drift.
+    static int64_t computeExactSampleCount(int64_t inputSamples, uint32_t srcRate, uint32_t dstRate) noexcept;
+
+    /// @brief Resample a single-channel float buffer from srcRate to dstRate using windowed sinc filter.
     static bool resample(const std::vector<float>& input,
                          uint32_t srcRate,
                          uint32_t dstRate,
