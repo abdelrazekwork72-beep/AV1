@@ -10,21 +10,27 @@ bool hasValidSuite(const PrSDKPPixSuite* suite) noexcept {
 }
 
 uint32_t plane0BytesPerPixel(PixelFormat format) noexcept {
-    switch (format) {
-        case PixelFormat::BGRA8:
-        case PixelFormat::RGBA8:
-            return 4U;
-        case PixelFormat::YUV420P10LE:
-        case PixelFormat::YUV422P10LE:
-        case PixelFormat::YUV444P10LE:
-        case PixelFormat::YUV420P12LE:
-        case PixelFormat::YUV422P12LE:
-        case PixelFormat::YUV444P12LE:
-        case PixelFormat::P010LE:
-            return 2U;
-        default:
-            return 1U;
+    struct FmtBppEntry {
+        PixelFormat fmt;
+        uint32_t bpp;
+    };
+    static constexpr FmtBppEntry kTable[] = {
+        {PixelFormat::BGRA8, 4U},
+        {PixelFormat::RGBA8, 4U},
+        {PixelFormat::YUV420P10LE, 2U},
+        {PixelFormat::YUV422P10LE, 2U},
+        {PixelFormat::YUV444P10LE, 2U},
+        {PixelFormat::YUV420P12LE, 2U},
+        {PixelFormat::YUV422P12LE, 2U},
+        {PixelFormat::YUV444P12LE, 2U},
+        {PixelFormat::P010LE, 2U},
+    };
+    for (const auto& entry : kTable) {
+        if (entry.fmt == format) {
+            return entry.bpp;
+        }
     }
+    return 1U;
 }
 
 uint32_t computeMinRowBytes(const RawVideoFrame& frame) noexcept {
