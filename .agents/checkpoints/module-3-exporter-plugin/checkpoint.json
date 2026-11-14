@@ -2,18 +2,18 @@
   "moduleId": "module-3-exporter-plugin",
   "title": "Module 3: Exporter Plugin (OpenMedia_Exporter.prm)",
   "githubProjectNumber": null,
-  "updatedAt": "2026-11-14T12:10:00Z",
+  "updatedAt": "2026-11-14T12:25:00Z",
   "items": {
     "US-3.1.0": {
-      "status": "In Progress",
+      "status": "Done",
       "branch": "feat/us-3.1.0-exporter-registration-params-ui"
     },
     "US-3.2.0": {
-      "status": "In Progress",
+      "status": "Done",
       "branch": "feat/us-3.2.0-export-render-engine"
     },
     "US-3.3.0": {
-      "status": "In Progress",
+      "status": "Done",
       "branch": "feat/us-3.3.0-codecs-hardware-fallback"
     }
   }
