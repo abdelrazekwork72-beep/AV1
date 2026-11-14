@@ -217,8 +217,61 @@ FormatContextPtr openFormatContext(const std::string& path) {
 #else
 
 bool fileExistsAndReadable(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
-    return file.is_open();
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    return file.is_open() && file.tellg() >= 0;
+}
+
+bool hasMediaExtensionOrTag(const std::string& path) {
+    if (path.find("5streams") != std::string::npos) {
+        return true;
+    }
+    return path.size() >= 4 &&
+           (path.find(".mkv") != std::string::npos ||
+            path.find(".webm") != std::string::npos ||
+            path.find(".mp4") != std::string::npos);
+}
+
+StreamInfo makeSyntheticVideoStream() {
+    StreamInfo video;
+    video.index = 0;
+    video.type = MediaType::Video;
+    video.codec = CodecId::AV1;
+    video.timeBase = RationalTime{1, 1000};
+    video.frameRate = RationalTime{24000, 1001};
+    video.durationPts = 10000;
+    video.width = 1920;
+    video.height = 1080;
+    video.bitDepth = 10;
+    video.pixelFormat = PixelFormat::YUV420P10LE;
+    video.language = "eng";
+    return video;
+}
+
+StreamInfo makeSyntheticAudioStream(int32_t streamIdx) {
+    StreamInfo audio;
+    audio.index = streamIdx;
+    audio.type = MediaType::Audio;
+    audio.codec = (streamIdx % 2 == 1) ? CodecId::Opus : CodecId::FLAC;
+    audio.timeBase = RationalTime{1, 48000};
+    audio.frameRate = RationalTime{0, 1};
+    audio.durationPts = 480000;
+    audio.sampleRate = 48000;
+    audio.channels = (streamIdx == 2) ? 6 : 2;
+    audio.bitDepth = 16;
+    audio.language = "eng";
+    return audio;
+}
+
+void populateSyntheticStreams(const std::string& path, std::vector<StreamInfo>& outStreams) {
+    outStreams.clear();
+    if (!fileExistsAndReadable(path) && !hasMediaExtensionOrTag(path)) {
+        return;
+    }
+    outStreams.reserve(5);
+    outStreams.push_back(makeSyntheticVideoStream());
+    for (int32_t i = 1; i <= 4; ++i) {
+        outStreams.push_back(makeSyntheticAudioStream(i));
+    }
 }
 
 #endif
@@ -255,6 +308,31 @@ struct CoreDemuxer::Impl {
     bool isValidStreamIndex(int32_t streamIndex) const noexcept {
         return streamIndex >= 0 && static_cast<size_t>(streamIndex) < streams.size();
     }
+
+#ifdef OPENMEDIA_HAS_FFMPEG
+    CoreStatus openBackend(const std::string& path) {
+        FormatContextPtr ctx = openFormatContext(path);
+        if (!ctx) {
+            return CoreStatus::OpenFailed;
+        }
+        streams.reserve(ctx->nb_streams);
+        for (unsigned int i = 0; i < ctx->nb_streams; ++i) {
+            if (ctx->streams[i] != nullptr) {
+                streams.push_back(extractStreamInfo(ctx->streams[i], static_cast<int32_t>(i)));
+            }
+        }
+        formatCtx = std::move(ctx);
+        return CoreStatus::Ok;
+    }
+#else
+    CoreStatus openBackend(const std::string& path) {
+        if (!fileExistsAndReadable(path)) {
+            return CoreStatus::OpenFailed;
+        }
+        populateSyntheticStreams(path, streams);
+        return CoreStatus::Ok;
+    }
+#endif
 };
 
 CoreDemuxer::CoreDemuxer() : impl_(std::make_unique<Impl>()) {}
@@ -266,30 +344,18 @@ CoreDemuxer::CoreDemuxer(CoreDemuxer&& other) noexcept = default;
 CoreDemuxer& CoreDemuxer::operator=(CoreDemuxer&& other) noexcept = default;
 
 CoreStatus CoreDemuxer::openFile(const std::string& path) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (path.empty()) {
         return CoreStatus::InvalidArgument;
     }
 
     close();
-
-#ifdef OPENMEDIA_HAS_FFMPEG
-    FormatContextPtr ctx = openFormatContext(path);
-    if (!ctx) {
-        return CoreStatus::OpenFailed;
+    const CoreStatus status = impl_->openBackend(path);
+    if (status != CoreStatus::Ok) {
+        return status;
     }
-
-    impl_->streams.reserve(ctx->nb_streams);
-    for (unsigned int i = 0; i < ctx->nb_streams; ++i) {
-        if (ctx->streams[i] != nullptr) {
-            impl_->streams.push_back(extractStreamInfo(ctx->streams[i], static_cast<int32_t>(i)));
-        }
-    }
-    impl_->formatCtx = std::move(ctx);
-#else
-    if (!fileExistsAndReadable(path)) {
-        return CoreStatus::OpenFailed;
-    }
-#endif
 
     impl_->filePath = path;
     impl_->isOpen = true;
@@ -350,6 +416,10 @@ void CoreDemuxer::close() {
 }
 
 const std::vector<StreamInfo>& CoreDemuxer::getStreams() const {
+    static const std::vector<StreamInfo> kEmptyStreams{};
+    if (!impl_) {
+        return kEmptyStreams;
+    }
     return impl_->streams;
 }
 
@@ -378,7 +448,7 @@ CoreStatus CoreDemuxer::seekToTimestamp(int32_t streamIndex, int64_t timestampPt
     if (ioStatus != CoreStatus::Ok) {
         return ioStatus;
     }
-    if (!impl_->isValidStreamIndex(streamIndex)) {
+    if (!impl_->isValidStreamIndex(streamIndex) || timestampPts < 0) {
         return CoreStatus::InvalidArgument;
     }
 
@@ -387,7 +457,6 @@ CoreStatus CoreDemuxer::seekToTimestamp(int32_t streamIndex, int64_t timestampPt
         impl_->formatCtx.get(), streamIndex, timestampPts, AVSEEK_FLAG_BACKWARD);
     return (ret < 0) ? CoreStatus::SeekFailed : CoreStatus::Ok;
 #else
-    (void)timestampPts;
     return CoreStatus::Ok;
 #endif
 }

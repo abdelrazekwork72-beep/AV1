@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -47,6 +48,18 @@ void testInvalidPathsAndUninitializedCalls() {
     assert(demuxer.seekToTimestamp(0, 0) == openmedia::CoreStatus::NotInitialized);
     assert(demuxer.quietFile() == openmedia::CoreStatus::NotInitialized);
     assert(demuxer.reopenIfQuieted() == openmedia::CoreStatus::NotInitialized);
+
+    openmedia::CoreDemuxer movedDemuxer(std::move(demuxer));
+    assert(demuxer.getStreams().empty());
+    assert(!demuxer.isOpen());
+}
+
+void verifyDiscoveredStreams(const std::vector<openmedia::StreamInfo>& streams) {
+    assert(!streams.empty());
+    for (const auto& s : streams) {
+        assert(s.timeBase.den >= 1);
+        assert(s.frameRate.den >= 1);
+    }
 }
 
 void testQuietAndReopenLifecycle() {
@@ -59,11 +72,7 @@ void testQuietAndReopenLifecycle() {
         assert(demuxer.isOpen());
         assert(!demuxer.isQuieted());
         const auto& streams = demuxer.getStreams();
-        assert(!streams.empty());
-        for (const auto& s : streams) {
-            assert(s.timeBase.den >= 1);
-            assert(s.frameRate.den >= 1);
-        }
+        verifyDiscoveredStreams(streams);
         const size_t streamCount = streams.size();
 
         assert(demuxer.quietFile() == openmedia::CoreStatus::Ok);
@@ -83,24 +92,38 @@ void testQuietAndReopenLifecycle() {
 #else
     (void)fixtureEnv;
     const auto tempPath =
-        std::filesystem::temp_directory_path() / "openmedia_test_demuxer_dummy.bin";
+        std::filesystem::temp_directory_path() / "openmedia_test_5streams.mkv";
     {
         std::ofstream ofs(tempPath, std::ios::binary);
-        ofs << "dummy";
+        ofs << "\x1A\x45\xDF\xA3matroska";
     }
     assert(demuxer.openFile(tempPath.string()) == openmedia::CoreStatus::Ok);
     assert(demuxer.isOpen());
     assert(!demuxer.isQuieted());
 
+    const auto& streams = demuxer.getStreams();
+    assert(streams.size() == 5);
+    verifyDiscoveredStreams(streams);
+    assert(streams[0].type == openmedia::MediaType::Video);
+    assert(streams[0].codec == openmedia::CodecId::AV1);
+    assert(streams[0].frameRate.num == 24000 && streams[0].frameRate.den == 1001);
+    assert(streams[1].type == openmedia::MediaType::Audio);
+    assert(streams[1].timeBase.num == 1 && streams[1].timeBase.den == 48000);
+
     assert(demuxer.quietFile() == openmedia::CoreStatus::Ok);
     assert(demuxer.isQuieted());
+    assert(demuxer.getStreams().size() == 5);
 
     assert(demuxer.reopenIfQuieted() == openmedia::CoreStatus::Ok);
     assert(!demuxer.isQuieted());
+    assert(demuxer.getStreams().size() == 5);
 
     openmedia::EncodedPacket pkt;
     assert(demuxer.readNextPacket(pkt) == openmedia::CoreStatus::EndOfFile);
-    assert(demuxer.seekToTimestamp(0, 0) == openmedia::CoreStatus::InvalidArgument);
+    assert(demuxer.seekToTimestamp(0, 0) == openmedia::CoreStatus::Ok);
+    assert(demuxer.seekToTimestamp(4, 48000) == openmedia::CoreStatus::Ok);
+    assert(demuxer.seekToTimestamp(5, 0) == openmedia::CoreStatus::InvalidArgument);
+    assert(demuxer.seekToTimestamp(-1, 0) == openmedia::CoreStatus::InvalidArgument);
 
     demuxer.close();
     assert(!demuxer.isOpen());

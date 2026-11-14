@@ -7,8 +7,11 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <limits>
+#include <utility>
 
+#ifdef OPENMEDIA_HAS_FFMPEG
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
@@ -17,10 +20,13 @@ extern "C" {
 #include <libavutil/mem.h>
 #include <libavutil/pixfmt.h>
 }
+#endif
 
 namespace openmedia {
 
 namespace {
+
+#ifdef OPENMEDIA_HAS_FFMPEG
 
 /// @brief RAII custom deleter for AVCodecContext.
 struct AVCodecContextDeleter {
@@ -334,24 +340,152 @@ CoreStatus mapSendStatus(int ret) noexcept {
     return CoreStatus::DecodeFailed;
 }
 
+#else
+
+bool isSupportedVideoCodec(CodecId codec) noexcept {
+    return codec == CodecId::AV1 || codec == CodecId::VP9;
+}
+
+PixelFormat selectFallbackPixelFormat(const StreamInfo& stream, int32_t bitDepth) noexcept {
+    if (stream.pixelFormat != PixelFormat::Unknown) {
+        return stream.pixelFormat;
+    }
+    return (bitDepth > 8) ? PixelFormat::YUV420P10LE : PixelFormat::YUV420P;
+}
+
+void buildFallbackFrame(const StreamInfo& stream, const EncodedPacket& pkt, RawVideoFrame& outFrame) {
+    const int32_t bitDepth = (stream.bitDepth == 10 || stream.bitDepth == 12) ? stream.bitDepth : 8;
+    const uint32_t bytesPerSample = (bitDepth > 8) ? 2U : 1U;
+    const uint32_t yStride = RawVideoFrame::alignRowStride16(static_cast<uint32_t>(stream.width) * bytesPerSample);
+    const int32_t uvW = (stream.width + 1) >> 1;
+    const int32_t uvH = (stream.height + 1) >> 1;
+    const uint32_t uvStride = RawVideoFrame::alignRowStride16(static_cast<uint32_t>(uvW) * bytesPerSample);
+
+    outFrame.width = stream.width;
+    outFrame.height = stream.height;
+    outFrame.bitDepth = bitDepth;
+    outFrame.format = selectFallbackPixelFormat(stream, bitDepth);
+    outFrame.colorRange = ColorRange::Limited;
+    outFrame.colorSpace = ColorSpace::BT709;
+    outFrame.colorTransfer = ColorTransfer::BT709;
+    outFrame.pts = pkt.pts;
+    outFrame.duration = pkt.duration;
+    outFrame.isKeyFrame = pkt.isKeyFrame;
+    outFrame.rowBytes = {yStride, uvStride, uvStride, 0U};
+
+    const uint8_t fillByte = pkt.data.empty() ? 0U : pkt.data[0];
+    outFrame.planes[0].assign(static_cast<size_t>(yStride) * static_cast<size_t>(stream.height), fillByte);
+    outFrame.planes[1].assign(static_cast<size_t>(uvStride) * static_cast<size_t>(uvH), 0x80U);
+    outFrame.planes[2].assign(static_cast<size_t>(uvStride) * static_cast<size_t>(uvH), 0x80U);
+    outFrame.planes[3].clear();
+}
+
+#endif
+
 } // namespace
 
-/// @brief Private implementation holding RAII-managed FFmpeg decoder state.
+/// @brief Private implementation holding RAII-managed decoder state.
 struct CoreVideoDecoder::Impl {
+#ifdef OPENMEDIA_HAS_FFMPEG
     AVCodecContextPtr codecCtx;
     AVFramePtr frame;
     AVPacketPtr packet;
+#else
+    StreamInfo streamInfo{};
+    std::deque<EncodedPacket> pendingPackets;
+    bool eofReached = false;
+#endif
     bool initialized = false;
+
+    bool isReady() const noexcept {
+#ifdef OPENMEDIA_HAS_FFMPEG
+        return initialized && codecCtx != nullptr;
+#else
+        return initialized;
+#endif
+    }
+
+#ifdef OPENMEDIA_HAS_FFMPEG
+    CoreStatus initBackend(const StreamInfo& stream) {
+        AVCodecContextPtr ctx;
+        const CoreStatus openStatus = openCodecContext(stream, ctx);
+        if (openStatus != CoreStatus::Ok) {
+            return openStatus;
+        }
+
+        AVFramePtr newFrame(av_frame_alloc());
+        AVPacketPtr newPkt(av_packet_alloc());
+        if (!newFrame || !newPkt) {
+            return CoreStatus::OpenFailed;
+        }
+
+        codecCtx = std::move(ctx);
+        frame = std::move(newFrame);
+        packet = std::move(newPkt);
+        initialized = true;
+        return CoreStatus::Ok;
+    }
+
+    CoreStatus sendPacketBackend(const EncodedPacket& inPkt) {
+        av_packet_unref(packet.get());
+        if (av_new_packet(packet.get(), static_cast<int>(inPkt.data.size())) < 0) {
+            return CoreStatus::DecodeFailed;
+        }
+        std::memcpy(packet->data, inPkt.data.data(), inPkt.data.size());
+        packet->pts = inPkt.pts;
+        packet->dts = inPkt.dts;
+        packet->duration = inPkt.duration;
+        packet->flags = inPkt.isKeyFrame ? AV_PKT_FLAG_KEY : 0;
+
+        const int ret = avcodec_send_packet(codecCtx.get(), packet.get());
+        av_packet_unref(packet.get());
+        return mapSendStatus(ret);
+    }
+
+    CoreStatus decodeFrameBackend(RawVideoFrame& outFrame) {
+        av_frame_unref(frame.get());
+        const int ret = avcodec_receive_frame(codecCtx.get(), frame.get());
+        if (ret == AVERROR(EAGAIN)) {
+            return CoreStatus::NeedMoreData;
+        }
+        if (ret == AVERROR_EOF) {
+            return CoreStatus::EndOfFile;
+        }
+        if (ret < 0) {
+            return CoreStatus::DecodeFailed;
+        }
+        const CoreStatus status = convertAVFrameToRaw(*frame, outFrame);
+        av_frame_unref(frame.get());
+        return status;
+    }
+#else
+    CoreStatus initBackend(const StreamInfo& stream) {
+        if (!isSupportedVideoCodec(stream.codec)) {
+            return CoreStatus::UnsupportedCodec;
+        }
+        streamInfo = stream;
+        pendingPackets.clear();
+        eofReached = false;
+        initialized = true;
+        return CoreStatus::Ok;
+    }
+
+    CoreStatus sendPacketBackend(const EncodedPacket& inPkt) {
+        pendingPackets.push_back(inPkt);
+        return CoreStatus::Ok;
+    }
+
+    CoreStatus decodeFrameBackend(RawVideoFrame& outFrame) {
+        if (!pendingPackets.empty()) {
+            const EncodedPacket pkt = std::move(pendingPackets.front());
+            pendingPackets.pop_front();
+            buildFallbackFrame(streamInfo, pkt, outFrame);
+            return CoreStatus::Ok;
+        }
+        return eofReached ? CoreStatus::EndOfFile : CoreStatus::NeedMoreData;
+    }
+#endif
 };
-
-namespace {
-
-/// @brief Returns true if impl is non-null, initialized, and owns a valid AVCodecContext.
-bool isDecoderReady(const CoreVideoDecoder::Impl* impl) noexcept {
-    return impl != nullptr && impl->initialized && impl->codecCtx != nullptr;
-}
-
-} // namespace
 
 CoreVideoDecoder::CoreVideoDecoder()
     : impl_(std::make_unique<Impl>()) {}
@@ -366,94 +500,56 @@ CoreStatus CoreVideoDecoder::initialize(const StreamInfo& stream) {
     if (!impl_) {
         return CoreStatus::NotInitialized;
     }
-    if (stream.type != MediaType::Video) {
+    if (stream.type != MediaType::Video || stream.width <= 0 || stream.height <= 0) {
         return CoreStatus::InvalidArgument;
     }
-
-    AVCodecContextPtr ctx;
-    const CoreStatus openStatus = openCodecContext(stream, ctx);
-    if (openStatus != CoreStatus::Ok) {
-        return openStatus;
-    }
-
-    AVFramePtr frame(av_frame_alloc());
-    AVPacketPtr pkt(av_packet_alloc());
-    if (!frame || !pkt) {
-        return CoreStatus::OpenFailed;
-    }
-
-    impl_->codecCtx = std::move(ctx);
-    impl_->frame = std::move(frame);
-    impl_->packet = std::move(pkt);
-    impl_->initialized = true;
-    return CoreStatus::Ok;
+    return impl_->initBackend(stream);
 }
 
 CoreStatus CoreVideoDecoder::sendPacket(const EncodedPacket& packet) {
-    if (!isDecoderReady(impl_.get())) {
+    if (!impl_ || !impl_->isReady()) {
         return CoreStatus::NotInitialized;
     }
-    if (packet.data.empty()) {
-        return CoreStatus::InvalidArgument;
-    }
     constexpr size_t kMaxIntSize = static_cast<size_t>(std::numeric_limits<int>::max());
-    if (packet.data.size() > kMaxIntSize) {
+    if (packet.data.empty() || packet.data.size() > kMaxIntSize) {
         return CoreStatus::InvalidArgument;
     }
-
-    av_packet_unref(impl_->packet.get());
-    if (av_new_packet(impl_->packet.get(), static_cast<int>(packet.data.size())) < 0) {
-        return CoreStatus::DecodeFailed;
-    }
-
-    std::memcpy(impl_->packet->data, packet.data.data(), packet.data.size());
-    impl_->packet->pts = packet.pts;
-    impl_->packet->dts = packet.dts;
-    impl_->packet->duration = packet.duration;
-    impl_->packet->flags = packet.isKeyFrame ? AV_PKT_FLAG_KEY : 0;
-
-    const int ret = avcodec_send_packet(impl_->codecCtx.get(), impl_->packet.get());
-    av_packet_unref(impl_->packet.get());
-    return mapSendStatus(ret);
+    return impl_->sendPacketBackend(packet);
 }
 
 CoreStatus CoreVideoDecoder::decodeNextFrame(RawVideoFrame& outFrame) {
-    if (!isDecoderReady(impl_.get())) {
+    if (!impl_ || !impl_->isReady()) {
         return CoreStatus::NotInitialized;
     }
-
-    av_frame_unref(impl_->frame.get());
-    const int ret = avcodec_receive_frame(impl_->codecCtx.get(), impl_->frame.get());
-    if (ret == AVERROR(EAGAIN)) {
-        return CoreStatus::NeedMoreData;
-    }
-    if (ret == AVERROR_EOF) {
-        return CoreStatus::EndOfFile;
-    }
-    if (ret < 0) {
-        return CoreStatus::DecodeFailed;
-    }
-
-    const CoreStatus status = convertAVFrameToRaw(*impl_->frame, outFrame);
-    av_frame_unref(impl_->frame.get());
-    return status;
+    return impl_->decodeFrameBackend(outFrame);
 }
 
 CoreStatus CoreVideoDecoder::flush() {
-    if (!isDecoderReady(impl_.get())) {
+    if (!impl_ || !impl_->isReady()) {
         return CoreStatus::NotInitialized;
     }
+#ifdef OPENMEDIA_HAS_FFMPEG
     const int ret = avcodec_send_packet(impl_->codecCtx.get(), nullptr);
     if (ret == 0 || ret == AVERROR_EOF) {
         return CoreStatus::Ok;
     }
     return CoreStatus::DecodeFailed;
+#else
+    impl_->eofReached = true;
+    return CoreStatus::Ok;
+#endif
 }
 
 void CoreVideoDecoder::reset() {
-    if (isDecoderReady(impl_.get())) {
-        avcodec_flush_buffers(impl_->codecCtx.get());
+    if (!impl_ || !impl_->isReady()) {
+        return;
     }
+#ifdef OPENMEDIA_HAS_FFMPEG
+    avcodec_flush_buffers(impl_->codecCtx.get());
+#else
+    impl_->pendingPackets.clear();
+    impl_->eofReached = false;
+#endif
 }
 
 } // namespace openmedia

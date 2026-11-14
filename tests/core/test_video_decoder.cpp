@@ -21,18 +21,56 @@ void check(bool condition, const char* testName, const char* detail) {
     ++gFailureCount;
 }
 
+struct AlignmentCase {
+    const char* label;
+    int32_t width;
+    int32_t height;
+    int32_t bitDepth;
+    openmedia::PixelFormat format;
+    uint32_t expectedYStride;
+    uint32_t expectedUVStride;
+};
+
+bool hasValidPlaneAlignment(const openmedia::RawVideoFrame& frame) noexcept {
+    if (frame.rowBytes[0] % 16U != 0U) {
+        return false;
+    }
+    return (frame.rowBytes[1] % 16U == 0U) && (frame.rowBytes[2] % 16U == 0U);
+}
+
+bool matchesExpectedStrides(const openmedia::RawVideoFrame& frame,
+                            const AlignmentCase& c) noexcept {
+    if (frame.rowBytes[0] != c.expectedYStride) {
+        return false;
+    }
+    return (frame.rowBytes[1] == c.expectedUVStride) &&
+           (frame.rowBytes[2] == c.expectedUVStride);
+}
+
+void verifySingleAlignmentCase(const AlignmentCase& c) {
+    const uint32_t bytesPerSample = (c.bitDepth > 8) ? 2U : 1U;
+    const uint32_t yWidthBytes = static_cast<uint32_t>(c.width) * bytesPerSample;
+    const bool is444 = (c.format == openmedia::PixelFormat::YUV444P12LE);
+    const uint32_t uvWidthPixels = is444
+        ? static_cast<uint32_t>(c.width)
+        : static_cast<uint32_t>((c.width + 1) >> 1);
+    const uint32_t uvWidthBytes = uvWidthPixels * bytesPerSample;
+
+    openmedia::RawVideoFrame frame;
+    frame.width = c.width;
+    frame.height = c.height;
+    frame.bitDepth = c.bitDepth;
+    frame.format = c.format;
+    frame.rowBytes[0] = openmedia::RawVideoFrame::alignRowStride16(yWidthBytes);
+    frame.rowBytes[1] = openmedia::RawVideoFrame::alignRowStride16(uvWidthBytes);
+    frame.rowBytes[2] = openmedia::RawVideoFrame::alignRowStride16(uvWidthBytes);
+
+    const bool ok = hasValidPlaneAlignment(frame) && matchesExpectedStrides(frame, c);
+    check(ok, "TC-1.2.2 Alignment", c.label);
+}
+
 /// @brief Verifies RawVideoFrame::alignRowStride16 and 16-byte row alignment across 8/10/12-bit formats.
 void test16ByteRowAlignment() {
-    struct AlignmentCase {
-        const char* label;
-        int32_t width;
-        int32_t height;
-        int32_t bitDepth;
-        openmedia::PixelFormat format;
-        uint32_t expectedYStride;
-        uint32_t expectedUVStride;
-    };
-
     const std::vector<AlignmentCase> cases = {
         {"8-bit YUV420P 1920x1080", 1920, 1080, 8, openmedia::PixelFormat::YUV420P, 1920U, 960U},
         {"8-bit YUV420P 1919x1080 (odd)", 1919, 1080, 8, openmedia::PixelFormat::YUV420P, 1920U, 960U},
@@ -43,30 +81,7 @@ void test16ByteRowAlignment() {
     };
 
     for (const auto& c : cases) {
-        const uint32_t bytesPerSample = (c.bitDepth > 8) ? 2U : 1U;
-        const uint32_t yWidthBytes = static_cast<uint32_t>(c.width) * bytesPerSample;
-        const bool is444 = (c.format == openmedia::PixelFormat::YUV444P12LE);
-        const uint32_t uvWidthPixels = is444
-            ? static_cast<uint32_t>(c.width)
-            : static_cast<uint32_t>((c.width + 1) >> 1);
-        const uint32_t uvWidthBytes = uvWidthPixels * bytesPerSample;
-
-        openmedia::RawVideoFrame frame;
-        frame.width = c.width;
-        frame.height = c.height;
-        frame.bitDepth = c.bitDepth;
-        frame.format = c.format;
-        frame.rowBytes[0] = openmedia::RawVideoFrame::alignRowStride16(yWidthBytes);
-        frame.rowBytes[1] = openmedia::RawVideoFrame::alignRowStride16(uvWidthBytes);
-        frame.rowBytes[2] = openmedia::RawVideoFrame::alignRowStride16(uvWidthBytes);
-
-        const bool mod16Ok = (frame.rowBytes[0] % 16U == 0U) &&
-                             (frame.rowBytes[1] % 16U == 0U) &&
-                             (frame.rowBytes[2] % 16U == 0U);
-        const bool expectedOk = (frame.rowBytes[0] == c.expectedYStride) &&
-                                (frame.rowBytes[1] == c.expectedUVStride) &&
-                                (frame.rowBytes[2] == c.expectedUVStride);
-        check(mod16Ok && expectedOk, "TC-1.2.2 Alignment", c.label);
+        verifySingleAlignmentCase(c);
     }
 }
 
@@ -79,6 +94,14 @@ void testInitializationValidation() {
     audioStream.codec = openmedia::CodecId::Opus;
     check(decoder.initialize(audioStream) == openmedia::CoreStatus::InvalidArgument,
           "TC-1.2.2 Init", "Non-video stream returns InvalidArgument");
+
+    openmedia::StreamInfo badDimsVideo;
+    badDimsVideo.type = openmedia::MediaType::Video;
+    badDimsVideo.codec = openmedia::CodecId::AV1;
+    badDimsVideo.width = 0;
+    badDimsVideo.height = 1080;
+    check(decoder.initialize(badDimsVideo) == openmedia::CoreStatus::InvalidArgument,
+          "TC-1.2.2 Init", "Zero width video stream returns InvalidArgument");
 
     openmedia::StreamInfo unsupportedVideo;
     unsupportedVideo.type = openmedia::MediaType::Video;
@@ -110,8 +133,7 @@ void testInitializationValidation() {
           "TC-1.2.2 Init", "VP9 stream initializes CoreVideoDecoder");
 }
 
-/// @brief Verifies error handling for moved-from, uninitialized, empty, and corrupt inputs.
-void testErrorHandling() {
+void verifyUninitializedAndMovedGuards() {
     openmedia::CoreVideoDecoder uninitDecoder;
     openmedia::EncodedPacket pkt;
     pkt.data = {0x01, 0x02, 0x03};
@@ -129,6 +151,8 @@ void testErrorHandling() {
     openmedia::StreamInfo dummyStream;
     dummyStream.type = openmedia::MediaType::Video;
     dummyStream.codec = openmedia::CodecId::VP9;
+    dummyStream.width = 640;
+    dummyStream.height = 360;
     uninitDecoder.reset();
     check(uninitDecoder.initialize(dummyStream) == openmedia::CoreStatus::NotInitialized,
           "TC-1.2.2 Error", "initialize on moved-from instance returns NotInitialized");
@@ -138,6 +162,19 @@ void testErrorHandling() {
           "TC-1.2.2 Error", "decodeNextFrame on moved-from instance returns NotInitialized");
     check(uninitDecoder.flush() == openmedia::CoreStatus::NotInitialized,
           "TC-1.2.2 Error", "flush on moved-from instance returns NotInitialized");
+}
+
+bool isValidTerminalStatus(openmedia::CoreStatus status) noexcept {
+    if (status == openmedia::CoreStatus::EndOfFile) {
+        return true;
+    }
+    return status == openmedia::CoreStatus::NeedMoreData ||
+           status == openmedia::CoreStatus::DecodeFailed;
+}
+
+/// @brief Verifies error handling for moved-from, uninitialized, empty, and corrupt inputs.
+void testErrorHandling() {
+    verifyUninitializedAndMovedGuards();
 
     openmedia::CoreVideoDecoder decoder;
     openmedia::StreamInfo vp9Stream;
@@ -154,6 +191,7 @@ void testErrorHandling() {
     check(decoder.sendPacket(emptyPacket) == openmedia::CoreStatus::InvalidArgument,
           "TC-1.2.2 Error", "Empty packet returns InvalidArgument");
 
+    openmedia::RawVideoFrame frame;
     check(decoder.decodeNextFrame(frame) == openmedia::CoreStatus::NeedMoreData,
           "TC-1.2.2 Error", "decodeNextFrame with no packets returns NeedMoreData");
 
@@ -168,9 +206,7 @@ void testErrorHandling() {
     check(decoder.flush() == openmedia::CoreStatus::Ok,
           "TC-1.2.2 Error", "flush after reset returns Ok");
     const auto drainStatus = decoder.decodeNextFrame(frame);
-    check(drainStatus == openmedia::CoreStatus::EndOfFile ||
-              drainStatus == openmedia::CoreStatus::NeedMoreData ||
-              drainStatus == openmedia::CoreStatus::DecodeFailed,
+    check(isValidTerminalStatus(drainStatus),
           "TC-1.2.2 Error", "decodeNextFrame after flush returns terminal/need-data status");
 }
 
