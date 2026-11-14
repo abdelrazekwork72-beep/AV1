@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -98,6 +99,11 @@ bool isValidFrameFormat(const AVFrame* frame) noexcept {
     return frame->sample_rate > 0;
 }
 
+bool isValidPacketPayload(const std::vector<uint8_t>& data) noexcept {
+    return !data.empty() &&
+           data.size() <= static_cast<size_t>(std::numeric_limits<int>::max());
+}
+
 } // namespace
 
 class CoreAudioDecoder::Impl {
@@ -121,7 +127,7 @@ public:
         if (!initialized_) {
             return CoreStatus::NotInitialized;
         }
-        if (packet.data.empty()) {
+        if (!isValidPacketPayload(packet.data)) {
             return CoreStatus::InvalidArgument;
         }
         if (av_new_packet(packet_.get(), static_cast<int>(packet.data.size())) < 0) {
@@ -209,6 +215,10 @@ private:
         }
         if (stream.extradata.empty()) {
             return CoreStatus::Ok;
+        }
+        if (stream.extradata.size() >
+            static_cast<size_t>(std::numeric_limits<int>::max() - AV_INPUT_BUFFER_PADDING_SIZE)) {
+            return CoreStatus::InvalidArgument;
         }
         const size_t allocSize = stream.extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE;
         auto* extra = static_cast<uint8_t*>(av_mallocz(allocSize));
@@ -423,22 +433,37 @@ CoreAudioDecoder::CoreAudioDecoder(CoreAudioDecoder&& other) noexcept = default;
 CoreAudioDecoder& CoreAudioDecoder::operator=(CoreAudioDecoder&& other) noexcept = default;
 
 CoreStatus CoreAudioDecoder::initialize(const StreamInfo& stream, int32_t targetSampleRate) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     return impl_->initialize(stream, targetSampleRate);
 }
 
 CoreStatus CoreAudioDecoder::sendPacket(const EncodedPacket& packet) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     return impl_->sendPacket(packet);
 }
 
 CoreStatus CoreAudioDecoder::decodeAudioBatch(int32_t maxSamples, RawAudioBatch& outBatch) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     return impl_->decodeAudioBatch(maxSamples, outBatch);
 }
 
 CoreStatus CoreAudioDecoder::flush() {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     return impl_->flush();
 }
 
 void CoreAudioDecoder::reset() {
+    if (!impl_) {
+        return;
+    }
     impl_->reset();
 }
 

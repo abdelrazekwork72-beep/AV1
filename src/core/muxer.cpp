@@ -13,6 +13,7 @@ extern "C" {
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -158,6 +159,10 @@ bool copyExtradata(AVCodecParameters* codecpar, const std::vector<uint8_t>& extr
     if (extradata.empty()) {
         return true;
     }
+    if (extradata.size() >
+        static_cast<size_t>(std::numeric_limits<int>::max() - AV_INPUT_BUFFER_PADDING_SIZE)) {
+        return false;
+    }
     auto* buf = static_cast<uint8_t*>(av_mallocz(extradata.size() + AV_INPUT_BUFFER_PADDING_SIZE));
     if (!buf) {
         return false;
@@ -201,6 +206,9 @@ void setPacketMetadata(AVPacket* pkt, const EncodedPacket& packet) noexcept {
 }
 
 AVPacketPtr buildAvPacket(const EncodedPacket& packet) {
+    if (packet.data.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
+        return nullptr;
+    }
     AVPacketPtr pkt(av_packet_alloc());
     if (!pkt) {
         return nullptr;
@@ -430,6 +438,10 @@ struct CoreMuxer::Impl {
         return formatCtx != nullptr && headerWritten;
     }
 
+    bool canAddStream() const noexcept {
+        return formatCtx != nullptr && !headerWritten;
+    }
+
     bool isValidPacketOrder(const EncodedPacket& packet) const noexcept {
         if (packet.streamIndex < 0) {
             return false;
@@ -463,6 +475,9 @@ CoreMuxer::CoreMuxer(CoreMuxer&&) noexcept = default;
 CoreMuxer& CoreMuxer::operator=(CoreMuxer&&) noexcept = default;
 
 CoreStatus CoreMuxer::openContainer(const std::string& path, const std::string& formatName) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (path.empty()) {
         return CoreStatus::InvalidArgument;
     }
@@ -483,7 +498,10 @@ CoreStatus CoreMuxer::openContainer(const std::string& path, const std::string& 
 }
 
 int32_t CoreMuxer::addStream(const MuxerStreamConfig& streamConfig) {
-    if (!impl_->formatCtx || impl_->headerWritten) {
+    if (!impl_) {
+        return -1;
+    }
+    if (!impl_->canAddStream()) {
         return -1;
     }
     AVStream* stream = avformat_new_stream(impl_->formatCtx.get(), nullptr);
@@ -502,6 +520,9 @@ int32_t CoreMuxer::addStream(const MuxerStreamConfig& streamConfig) {
 }
 
 CoreStatus CoreMuxer::writeHeader() {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (!impl_->formatCtx) {
         return CoreStatus::NotInitialized;
     }
@@ -516,6 +537,9 @@ CoreStatus CoreMuxer::writeHeader() {
 }
 
 CoreStatus CoreMuxer::writeInterleavedPacket(const EncodedPacket& packet) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (!impl_->isReadyForPackets()) {
         return CoreStatus::NotInitialized;
     }
@@ -534,6 +558,9 @@ CoreStatus CoreMuxer::writeInterleavedPacket(const EncodedPacket& packet) {
 }
 
 CoreStatus CoreMuxer::writeTrailerAndClose() {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (!impl_->formatCtx) {
         return CoreStatus::NotInitialized;
     }
@@ -612,6 +639,10 @@ struct CoreAudioEncoder::Impl {
         return drainEncoderPackets(codecCtx.get(), outPackets);
     }
 
+    bool hasPendingSamples() const noexcept {
+        return !fifo.empty() && !fifo[0].empty();
+    }
+
     CoreStatus encodeAvailableChunks(std::vector<EncodedPacket>& outPackets) {
         const int32_t frameSize = resolveFrameSize();
         if (frameSize <= 0) {
@@ -633,6 +664,9 @@ CoreAudioEncoder::CoreAudioEncoder(CoreAudioEncoder&&) noexcept = default;
 CoreAudioEncoder& CoreAudioEncoder::operator=(CoreAudioEncoder&&) noexcept = default;
 
 CoreStatus CoreAudioEncoder::initialize(const AudioEncodeConfig& config) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (!isValidAudioConfig(config)) {
         return CoreStatus::InvalidArgument;
     }
@@ -653,6 +687,9 @@ CoreStatus CoreAudioEncoder::initialize(const AudioEncodeConfig& config) {
 }
 
 CoreStatus CoreAudioEncoder::encodeAudio(const RawAudioBatch& batch, std::vector<EncodedPacket>& outPackets) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (!impl_->codecCtx) {
         return CoreStatus::NotInitialized;
     }
@@ -664,10 +701,13 @@ CoreStatus CoreAudioEncoder::encodeAudio(const RawAudioBatch& batch, std::vector
 }
 
 CoreStatus CoreAudioEncoder::flush(std::vector<EncodedPacket>& outPackets) {
+    if (!impl_) {
+        return CoreStatus::NotInitialized;
+    }
     if (!impl_->codecCtx) {
         return CoreStatus::NotInitialized;
     }
-    if (!impl_->fifo.empty() && !impl_->fifo[0].empty()) {
+    if (impl_->hasPendingSamples()) {
         const auto remaining = static_cast<int32_t>(impl_->fifo[0].size());
         CoreStatus st = impl_->encodeChunk(remaining, outPackets);
         if (st != CoreStatus::Ok) {
@@ -681,6 +721,9 @@ CoreStatus CoreAudioEncoder::flush(std::vector<EncodedPacket>& outPackets) {
 }
 
 std::vector<uint8_t> CoreAudioEncoder::getExtradata() const {
+    if (!impl_) {
+        return {};
+    }
     return impl_->extradata;
 }
 
