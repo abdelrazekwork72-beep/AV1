@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+struct exportStdParms;
+
 namespace openmedia::exporter {
 
 /// @brief Exporter parameter tree version invariant.
