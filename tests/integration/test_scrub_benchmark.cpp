@@ -1,24 +1,27 @@
 /// @file test_scrub_benchmark.cpp
 /// @brief Standalone C++17 benchmark test for TC-4.1.2 (ScrubLatencyBenchmark).
 
+#undef NDEBUG
 #include "scrub_benchmark.hpp"
 
 #include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <thread>
 
 int main() {
     alignas(16) std::uint8_t alignedFrameBuffer[64]{};
     openmedia::integration::ScrubLatencyBenchmark bench;
 
-    // Simulate AsyncImporterEntry(imGetSourceVideo) with GOP RingBuffer cache speedup (~15%)
+    // Simulate AsyncImporterEntry(imGetSourceVideo) with GOP RingBuffer cache speedup (~20%)
+    // Uses steady_clock high-resolution busy-wait to avoid Windows 15.6ms timer coalescing.
     const auto fetchFn = [&alignedFrameBuffer](std::int64_t /*frameIndex*/,
                                                bool useRingBufferCache,
                                                void** outAlignedPPix) -> bool {
-        const auto delayUs = useRingBufferCache ? 800 : 1000;
-        std::this_thread::sleep_for(std::chrono::microseconds(delayUs));
+        const auto delayUs = std::chrono::microseconds(useRingBufferCache ? 400 : 600);
+        const auto start = std::chrono::steady_clock::now();
+        while (std::chrono::steady_clock::now() - start < delayUs) {
+        }
         if (outAlignedPPix) {
             *outAlignedPPix = alignedFrameBuffer;
         }
