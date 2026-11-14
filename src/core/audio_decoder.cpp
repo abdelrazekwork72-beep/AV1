@@ -70,29 +70,30 @@ using AVFramePtr = std::unique_ptr<AVFrame, AVFrameDeleter>;
 using AVPacketPtr = std::unique_ptr<AVPacket, AVPacketDeleter>;
 
 AVCodecID resolvePcmCodecId(int32_t bitDepth) noexcept {
-    switch (bitDepth) {
-        case 24:
-            return AV_CODEC_ID_PCM_S24LE;
-        case 32:
-            return AV_CODEC_ID_PCM_F32LE;
-        default:
-            return AV_CODEC_ID_PCM_S16LE;
-    }
+    if (bitDepth == 24) return AV_CODEC_ID_PCM_S24LE;
+    if (bitDepth == 32) return AV_CODEC_ID_PCM_F32LE;
+    return AV_CODEC_ID_PCM_S16LE;
 }
 
 AVCodecID mapCodecId(const StreamInfo& stream) noexcept {
-    switch (stream.codec) {
-        case CodecId::Opus:
-            return AV_CODEC_ID_OPUS;
-        case CodecId::FLAC:
-            return AV_CODEC_ID_FLAC;
-        case CodecId::Vorbis:
-            return AV_CODEC_ID_VORBIS;
-        case CodecId::PCM:
-            return resolvePcmCodecId(stream.bitDepth);
-        default:
-            return AV_CODEC_ID_NONE;
+    if (stream.codec == CodecId::PCM) {
+        return resolvePcmCodecId(stream.bitDepth);
     }
+    struct AudioCodecMap {
+        CodecId src;
+        AVCodecID dst;
+    };
+    static constexpr AudioCodecMap kTable[] = {
+        {CodecId::Opus, AV_CODEC_ID_OPUS},
+        {CodecId::FLAC, AV_CODEC_ID_FLAC},
+        {CodecId::Vorbis, AV_CODEC_ID_VORBIS},
+    };
+    for (const auto& entry : kTable) {
+        if (entry.src == stream.codec) {
+            return entry.dst;
+        }
+    }
+    return AV_CODEC_ID_NONE;
 }
 
 const AVCodec* findDecoderForStream(const StreamInfo& stream) noexcept {
