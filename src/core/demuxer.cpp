@@ -136,38 +136,70 @@ RationalTime selectFrameRate(const AVStream* st) noexcept {
     return RationalTime::sanitize(candidate.num, candidate.den);
 }
 
+void populateCodecParameters(const AVCodecParameters* par, StreamInfo& info) {
+    if (par == nullptr) {
+        return;
+    }
+    info.type = mapMediaType(par->codec_type);
+    info.codec = mapCodecId(par->codec_id);
+    info.width = par->width;
+    info.height = par->height;
+    const auto avPixFmt = static_cast<AVPixelFormat>(par->format);
+    info.pixelFormat = mapPixelFormat(avPixFmt);
+    info.bitDepth = extractBitDepth(avPixFmt);
+    info.sampleRate = par->sample_rate;
+#if LIBAVCODEC_VERSION_MAJOR >= 59
+    info.channels = par->ch_layout.nb_channels;
+#else
+    info.channels = par->channels;
+#endif
+    if (par->extradata != nullptr && par->extradata_size > 0) {
+        info.extradata.assign(par->extradata, par->extradata + par->extradata_size);
+    }
+}
+
 StreamInfo extractStreamInfo(const AVStream* st, int32_t index) {
     StreamInfo info;
     info.index = index;
     info.timeBase = RationalTime::sanitize(st->time_base.num, st->time_base.den);
     info.frameRate = selectFrameRate(st);
     info.durationPts = (st->duration != AV_NOPTS_VALUE) ? st->duration : 0;
-
-    const AVCodecParameters* par = st->codecpar;
-    if (par != nullptr) {
-        info.type = mapMediaType(par->codec_type);
-        info.codec = mapCodecId(par->codec_id);
-        info.width = par->width;
-        info.height = par->height;
-        const auto avPixFmt = static_cast<AVPixelFormat>(par->format);
-        info.pixelFormat = mapPixelFormat(avPixFmt);
-        info.bitDepth = extractBitDepth(avPixFmt);
-        info.sampleRate = par->sample_rate;
-#if LIBAVCODEC_VERSION_MAJOR >= 59
-        info.channels = par->ch_layout.nb_channels;
-#else
-        info.channels = par->channels;
-#endif
-        if (par->extradata != nullptr && par->extradata_size > 0) {
-            info.extradata.assign(par->extradata, par->extradata + par->extradata_size);
-        }
-    }
+    populateCodecParameters(st->codecpar, info);
 
     const AVDictionaryEntry* langTag = av_dict_get(st->metadata, "language", nullptr, 0);
     if (langTag != nullptr && langTag->value != nullptr) {
         info.language = langTag->value;
     }
     return info;
+}
+
+void copyAvPacketToEncoded(const AVPacket& pkt, EncodedPacket& outPacket) {
+    outPacket.streamIndex = pkt.stream_index;
+    outPacket.pts = (pkt.pts != AV_NOPTS_VALUE) ? pkt.pts : 0;
+    outPacket.dts = (pkt.dts != AV_NOPTS_VALUE) ? pkt.dts : 0;
+    outPacket.duration = pkt.duration;
+    outPacket.isKeyFrame = (pkt.flags & AV_PKT_FLAG_KEY) != 0;
+    if (pkt.data != nullptr && pkt.size > 0) {
+        outPacket.data.assign(pkt.data, pkt.data + pkt.size);
+        return;
+    }
+    outPacket.data.clear();
+}
+
+CoreStatus readAvPacket(AVFormatContext& ctx, EncodedPacket& outPacket) {
+    PacketPtr pkt(av_packet_alloc());
+    if (!pkt) {
+        return CoreStatus::DecodeFailed;
+    }
+    const int ret = av_read_frame(&ctx, pkt.get());
+    if (ret == AVERROR_EOF) {
+        return CoreStatus::EndOfFile;
+    }
+    if (ret < 0) {
+        return CoreStatus::DecodeFailed;
+    }
+    copyAvPacketToEncoded(*pkt, outPacket);
+    return CoreStatus::Ok;
 }
 
 FormatContextPtr openFormatContext(const std::string& path) {
@@ -201,6 +233,28 @@ struct CoreDemuxer::Impl {
     std::vector<StreamInfo> streams;
     bool isOpen = false;
     bool isQuieted = false;
+
+    CoreStatus ensureActiveForIo(CoreDemuxer& self) {
+        if (!isOpen) {
+            return CoreStatus::NotInitialized;
+        }
+        if (isQuieted) {
+            const CoreStatus status = self.reopenIfQuieted();
+            if (status != CoreStatus::Ok) {
+                return status;
+            }
+        }
+#ifdef OPENMEDIA_HAS_FFMPEG
+        if (!formatCtx) {
+            return CoreStatus::NotInitialized;
+        }
+#endif
+        return CoreStatus::Ok;
+    }
+
+    bool isValidStreamIndex(int32_t streamIndex) const noexcept {
+        return streamIndex >= 0 && static_cast<size_t>(streamIndex) < streams.size();
+    }
 };
 
 CoreDemuxer::CoreDemuxer() : impl_(std::make_unique<Impl>()) {}
@@ -300,43 +354,16 @@ const std::vector<StreamInfo>& CoreDemuxer::getStreams() const {
 }
 
 CoreStatus CoreDemuxer::readNextPacket(EncodedPacket& outPacket) {
-    if (!impl_ || !impl_->isOpen) {
+    if (!impl_) {
         return CoreStatus::NotInitialized;
     }
-    if (impl_->isQuieted) {
-        const CoreStatus reopenStatus = reopenIfQuieted();
-        if (reopenStatus != CoreStatus::Ok) {
-            return reopenStatus;
-        }
+    const CoreStatus ioStatus = impl_->ensureActiveForIo(*this);
+    if (ioStatus != CoreStatus::Ok) {
+        return ioStatus;
     }
 
 #ifdef OPENMEDIA_HAS_FFMPEG
-    if (!impl_->formatCtx) {
-        return CoreStatus::NotInitialized;
-    }
-    PacketPtr pkt(av_packet_alloc());
-    if (!pkt) {
-        return CoreStatus::DecodeFailed;
-    }
-    const int ret = av_read_frame(impl_->formatCtx.get(), pkt.get());
-    if (ret == AVERROR_EOF) {
-        return CoreStatus::EndOfFile;
-    }
-    if (ret < 0) {
-        return CoreStatus::DecodeFailed;
-    }
-
-    outPacket.streamIndex = pkt->stream_index;
-    outPacket.pts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : 0;
-    outPacket.dts = (pkt->dts != AV_NOPTS_VALUE) ? pkt->dts : 0;
-    outPacket.duration = pkt->duration;
-    outPacket.isKeyFrame = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
-    if (pkt->data != nullptr && pkt->size > 0) {
-        outPacket.data.assign(pkt->data, pkt->data + pkt->size);
-    } else {
-        outPacket.data.clear();
-    }
-    return CoreStatus::Ok;
+    return readAvPacket(*impl_->formatCtx, outPacket);
 #else
     outPacket = EncodedPacket{};
     return CoreStatus::EndOfFile;
@@ -344,23 +371,18 @@ CoreStatus CoreDemuxer::readNextPacket(EncodedPacket& outPacket) {
 }
 
 CoreStatus CoreDemuxer::seekToTimestamp(int32_t streamIndex, int64_t timestampPts) {
-    if (!impl_ || !impl_->isOpen) {
+    if (!impl_) {
         return CoreStatus::NotInitialized;
     }
-    if (streamIndex < 0 || static_cast<size_t>(streamIndex) >= impl_->streams.size()) {
-        return CoreStatus::InvalidArgument;
+    const CoreStatus ioStatus = impl_->ensureActiveForIo(*this);
+    if (ioStatus != CoreStatus::Ok) {
+        return ioStatus;
     }
-    if (impl_->isQuieted) {
-        const CoreStatus reopenStatus = reopenIfQuieted();
-        if (reopenStatus != CoreStatus::Ok) {
-            return reopenStatus;
-        }
+    if (!impl_->isValidStreamIndex(streamIndex)) {
+        return CoreStatus::InvalidArgument;
     }
 
 #ifdef OPENMEDIA_HAS_FFMPEG
-    if (!impl_->formatCtx) {
-        return CoreStatus::NotInitialized;
-    }
     const int ret = av_seek_frame(
         impl_->formatCtx.get(), streamIndex, timestampPts, AVSEEK_FLAG_BACKWARD);
     return (ret < 0) ? CoreStatus::SeekFailed : CoreStatus::Ok;
