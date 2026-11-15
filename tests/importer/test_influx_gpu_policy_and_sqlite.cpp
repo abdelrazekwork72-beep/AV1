@@ -9,6 +9,7 @@
 #include <array>
 #include <cassert>
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <vector>
 
@@ -65,7 +66,8 @@ void testSqliteStrictThumbnailCache() {
     assert(PPixCacheBridge::validateStrictSchema(PPixCacheBridge::kSqlCreateThumbnails));
 
     PPixCacheBridge bridge;
-    const std::string dbPath = "/tmp/openmedia_thumb_test.db";
+    const std::string dbPath =
+        (std::filesystem::temp_directory_path() / "openmedia_thumb_test.db").string();
     std::remove(dbPath.c_str());
 
     ThumbnailCacheEntry entry;
