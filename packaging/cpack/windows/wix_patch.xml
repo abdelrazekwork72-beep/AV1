@@ -7,5 +7,20 @@
     <Condition Message="Administrator privileges are required to install MediaCore 7.0 plugins.">
       Privileged
     </Condition>
+
+    <!-- Verify Microsoft Visual C++ 2015-2022 Redistributable (x64) runtime DLLs -->
+    <Property Id="VCRUNTIME140_PRESENT">
+      <DirectorySearch Id="SearchSystem64VcRuntime140" Path="[System64Folder]" Depth="0">
+        <FileSearch Id="FindVcRuntime140" Name="VCRUNTIME140.dll" />
+      </DirectorySearch>
+    </Property>
+    <Property Id="VCRUNTIME140_1_PRESENT">
+      <DirectorySearch Id="SearchSystem64VcRuntime140_1" Path="[System64Folder]" Depth="0">
+        <FileSearch Id="FindVcRuntime140_1" Name="VCRUNTIME140_1.dll" />
+      </DirectorySearch>
+    </Property>
+    <Condition Message="Microsoft Visual C++ 2015-2022 Redistributable (x64) is missing (VCRUNTIME140.dll / VCRUNTIME140_1.dll not found in System32). Please install vc_redist.x64.exe from https://aka.ms/vs/17/release/vc_redist.x64.exe and re-run this installer.">
+      <![CDATA[Installed OR (VCRUNTIME140_PRESENT AND VCRUNTIME140_1_PRESENT)]]>
+    </Condition>
   </CPackWiXFragment>
 </CPackWiXPatch>

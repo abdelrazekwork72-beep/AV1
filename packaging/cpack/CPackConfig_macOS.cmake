@@ -10,11 +10,13 @@ set(CPACK_PACKAGE_VERSION_PATCH "0")
 set(OPENMEDIA_MACOS_MEDIACORE_DIR "/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore")
 set(CPACK_PACKAGING_INSTALL_PREFIX "${OPENMEDIA_MACOS_MEDIACORE_DIR}")
 
-# Packaged artifacts: OpenMedia_Importer.bundle, OpenMedia_Exporter.bundle, libOpenMediaCore.dylib
+# Packaged artifacts: Dual-PRM bundles (Normal + HP), Exporter bundle, libOpenMediaCore.dylib, Config.toml
 set(OPENMEDIA_MACOS_ARTIFACTS
     "OpenMedia_Importer.bundle"
+    "OpenMedia_ImporterHP.bundle"
     "OpenMedia_Exporter.bundle"
     "libOpenMediaCore.dylib"
+    "Config.toml"
 )
 
 set(CPACK_GENERATOR "productbuild;DragNDrop")

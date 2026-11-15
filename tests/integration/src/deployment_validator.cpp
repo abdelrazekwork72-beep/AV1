@@ -1,5 +1,5 @@
 /// @file deployment_validator.cpp
-/// @brief Implementation of DeploymentValidator for cross-platform MediaCore plugin verification.
+/// @brief Implementation of DeploymentValidator for Dual-PRM MediaCore plugin verification.
 
 #include "deployment_validator.hpp"
 
@@ -67,7 +67,34 @@ private:
     void* handle_{nullptr};
 };
 
+ImporterVariantResult evaluateImporterVariant(
+    ImportEntryFn importFn,
+    MockPremiereHost& host,
+    ImporterPriorityTier tier,
+    const std::string& piplName) {
+    ImporterVariantResult variant{};
+    variant.loaded = (importFn != nullptr);
+    variant.priorityTier = tier;
+    variant.piplName = piplName;
+    variant.piplValid = DeploymentValidator::verifyPiplName(tier, piplName);
+    if (!variant.loaded) {
+        return variant;
+    }
+    variant.handshakeOk = DeploymentValidator::verifyImporterHandshake(
+        importFn, host, variant.priority, variant.avoidAudioConform);
+    return variant;
+}
+
 } // namespace
+
+bool DeploymentValidator::verifyPiplName(
+    ImporterPriorityTier tier,
+    const std::string& piplName) noexcept {
+    if (tier == ImporterPriorityTier::Normal) {
+        return piplName == kNormalImporterPiplName;
+    }
+    return piplName == kHighPriorityImporterPiplName;
+}
 
 DeploymentValidationResult DeploymentValidator::validatePluginBinaries(
     const std::string& importerPath,
@@ -89,6 +116,33 @@ DeploymentValidationResult DeploymentValidator::validatePluginBinaries(
     return validateDirectEntryPoints(importFn, exportFn);
 }
 
+DeploymentValidationResult DeploymentValidator::validateDualPluginBinaries(
+    const std::string& normalImporterPath,
+    const std::string& hpImporterPath,
+    const std::string& exporterPath) const {
+    DeploymentValidationResult result{};
+    result.dualPrmMode = true;
+
+    ScopedLibrary normalLib(normalImporterPath);
+    ScopedLibrary hpLib(hpImporterPath);
+    ScopedLibrary exporterLib(exporterPath);
+
+    auto normalFn = normalLib.resolve<ImportEntryFn>("xImportEntry");
+    auto hpFn = hpLib.resolve<ImportEntryFn>("xImportEntry");
+    auto exportFn = exporterLib.resolve<ExportEntryFn>("xSDKExport");
+
+    result.normalImporter.loaded = normalLib.isLoaded() && normalFn != nullptr;
+    result.hpImporter.loaded = hpLib.isLoaded() && hpFn != nullptr;
+    result.exporterLoaded = exporterLib.isLoaded() && exportFn != nullptr;
+
+    if (!result.normalImporter.loaded || !result.hpImporter.loaded || !result.exporterLoaded) {
+        result.errorMessage = "Failed to load Dual-PRM or Exporter plugin binary.";
+        return result;
+    }
+
+    return validateDualDirectEntryPoints(normalFn, hpFn, exportFn);
+}
+
 DeploymentValidationResult DeploymentValidator::validateDirectEntryPoints(
     ImportEntryFn importFn,
     ExportEntryFn exportFn) const {
@@ -103,6 +157,36 @@ DeploymentValidationResult DeploymentValidator::validateDirectEntryPoints(
     MockPremiereHost host;
     result.importerHandshakeOk = verifyImporterHandshake(
         importFn, host, result.importerPriority, result.avoidAudioConform);
+    result.exporterHandshakeOk = verifyExporterHandshake(
+        exportFn, host, result.exporterContainerCount);
+    return result;
+}
+
+DeploymentValidationResult DeploymentValidator::validateDualDirectEntryPoints(
+    ImportEntryFn normalImportFn,
+    ImportEntryFn hpImportFn,
+    ExportEntryFn exportFn,
+    const std::string& normalPiplName,
+    const std::string& hpPiplName) const {
+    DeploymentValidationResult result{};
+    result.dualPrmMode = true;
+    if (!normalImportFn || !hpImportFn || !exportFn) {
+        result.errorMessage = "Null Dual-PRM or Exporter entry point pointer supplied.";
+        return result;
+    }
+
+    MockPremiereHost host;
+    result.normalImporter = evaluateImporterVariant(
+        normalImportFn, host, ImporterPriorityTier::Normal, normalPiplName);
+    result.hpImporter = evaluateImporterVariant(
+        hpImportFn, host, ImporterPriorityTier::High, hpPiplName);
+
+    result.importerLoaded = result.normalImporter.loaded && result.hpImporter.loaded;
+    result.importerHandshakeOk = result.normalImporter.handshakeOk && result.hpImporter.handshakeOk;
+    result.importerPriority = result.normalImporter.priority;
+    result.avoidAudioConform = result.normalImporter.avoidAudioConform && result.hpImporter.avoidAudioConform;
+
+    result.exporterLoaded = true;
     result.exporterHandshakeOk = verifyExporterHandshake(
         exportFn, host, result.exporterContainerCount);
     return result;
@@ -137,7 +221,7 @@ bool DeploymentValidator::verifyImporterHandshake(
     if (importFn(openmedia::importer::kSelQuietFile, &host.importerStdParms, nullptr, nullptr) != openmedia::importer::kImNoErr) {
         return false;
     }
-    return outPriority == 100 && outAvoidConform;
+    return outPriority >= 100 && outAvoidConform;
 }
 
 bool DeploymentValidator::verifyExporterHandshake(

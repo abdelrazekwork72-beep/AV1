@@ -3,7 +3,7 @@
 
 set(CPACK_PACKAGE_NAME "OpenMediaPremierePlugin")
 set(CPACK_PACKAGE_VENDOR "OpenMedia Project")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open-Source AV1/VP9/MKV Importer & Exporter for Adobe Premiere Pro & Media Encoder")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Open-Source AV1/VP9/MKV Dual-PRM Importer & Exporter for Adobe Premiere Pro & Media Encoder")
 set(CPACK_PACKAGE_VERSION_MAJOR "1")
 set(CPACK_PACKAGE_VERSION_MINOR "0")
 set(CPACK_PACKAGE_VERSION_PATCH "0")
@@ -11,11 +11,13 @@ set(CPACK_PACKAGE_VERSION_PATCH "0")
 set(OPENMEDIA_WIN_MEDIACORE_DIR "C:\\Program Files\\Adobe\\Common\\Plug-ins\\7.0\\MediaCore")
 set(CPACK_PACKAGING_INSTALL_PREFIX "${OPENMEDIA_WIN_MEDIACORE_DIR}")
 
-# Packaged binaries: OpenMedia_Importer.prm, OpenMedia_Exporter.prm, libOpenMediaCore.dll
+# Packaged binaries & config: Dual-PRM (Normal + HP), Exporter, OpenMediaCore.dll, Config.toml
 set(OPENMEDIA_WINDOWS_ARTIFACTS
     "OpenMedia_Importer.prm"
+    "OpenMedia_ImporterHP.prm"
     "OpenMedia_Exporter.prm"
-    "libOpenMediaCore.dll"
+    "OpenMediaCore.dll"
+    "Config.toml"
 )
 
 # WiX MSI Generator (supports silent enterprise install: msiexec /i OpenMedia.msi /qn)

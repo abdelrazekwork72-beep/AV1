@@ -39,6 +39,9 @@ int main() {
     assert(report.passed());
     assert(openmedia::integration::AmeQueueValidator::verifyContainerIntegrity(".mp4", {0x00, 0x00, 0x00, 0x18, 'f', 't', 'y', 'p'}));
 
+    const std::string sampleToml = "[dual_prm]\nenabled = true\n[decode_policy]\ngpu_min_width = 2560\ngpu_min_height = 1600\nmax_gpu_streams = 4\n";
+    assert(openmedia::integration::AmeQueueValidator::validateConfigTomlPolicy(sampleToml));
+    assert(!openmedia::integration::AmeQueueValidator::validateConfigTomlPolicy("[decode_policy]"));
     fs::remove_all(tempDir);
     std::cout << "[PASS] TC-4.1.3 AmeQueueValidator purged 2 stale caches and passed 5-job batch.\n";
     return 0;

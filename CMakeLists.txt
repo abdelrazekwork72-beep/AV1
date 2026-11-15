@@ -369,6 +369,9 @@ install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_ImporterHP OpenMedia_
     LIBRARY DESTINATION .
     BUNDLE DESTINATION .
 )
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/Config.toml")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/packaging/Config.toml" DESTINATION .)
+endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md" DESTINATION .)
 endif()
