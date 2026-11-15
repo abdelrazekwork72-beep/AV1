@@ -179,13 +179,16 @@ DurationCalculationMode parseDurationMode(const std::string& val) {
 
 void applyBoolOrIntConfig(const std::string& key, const std::string& val, OpenMediaConfig& cfg) {
     struct BoolField { const char* name; bool OpenMediaConfig::* ptr; };
-    static constexpr std::array<BoolField, 6> kBoolFields = {{
+    static constexpr std::array<BoolField, 9> kBoolFields = {{
         {"disable", &OpenMediaConfig::disable},
         {"overrideadobe", &OpenMediaConfig::overrideAdobe},
         {"disableautomaticoverride", &OpenMediaConfig::disableAutomaticOverride},
         {"reducewarnings", &OpenMediaConfig::reduceWarnings},
         {"disableseekingtable", &OpenMediaConfig::disableSeekingTable},
         {"disablethumbnailcache", &OpenMediaConfig::disableThumbnailCache},
+        {"debuglogs", &OpenMediaConfig::debugLogs},
+        {"disablemultithreading", &OpenMediaConfig::disableMultithreading},
+        {"disableframecache", &OpenMediaConfig::disableFrameCache},
     }};
     for (const auto& f : kBoolFields) {
         if (key == f.name) {
@@ -195,6 +198,9 @@ void applyBoolOrIntConfig(const std::string& key, const std::string& val, OpenMe
     }
     if (key == "maxframecachesizemb") cfg.maxFrameCacheSizeMB = parseUintToken(val, cfg.maxFrameCacheSizeMB);
     if (key == "maxpercentusageavailablememory") cfg.maxPercentUsageAvailableMemory = parseUintToken(val, cfg.maxPercentUsageAvailableMemory);
+    if (key == "maxlogfilesizemb") {
+        try { cfg.maxLogFileSizeMB = std::stoi(trimWhitespace(val)); } catch (...) {}
+    }
 }
 
 void applyConfigKeyValue(const std::string& rawKey, const std::string& val, OpenMediaConfig& cfg) {
@@ -213,6 +219,14 @@ void applyConfigKeyValue(const std::string& rawKey, const std::string& val, Open
     }
     if (key == "durationcalculation") {
         cfg.durationCalculation = parseDurationMode(val);
+        return;
+    }
+    if (key == "uilanguage") {
+        cfg.uiLanguage = toLowerAscii(stripQuotes(trimWhitespace(val)));
+        return;
+    }
+    if (key == "importpolicy") {
+        cfg.importPolicy = toLowerAscii(stripQuotes(trimWhitespace(val)));
         return;
     }
     applyBoolOrIntConfig(key, val, cfg);
@@ -281,6 +295,10 @@ void applyModifierToken(const std::string& token, FilenameModifiers& out) {
         if (!pf.empty()) out.pixelFormat = pf;
     }
     if (key == "fr" || key == "frame_rate") out.frameRate = parseFrameRateToken(val);
+    if (key == "ar" || key == "aspect_ratio") out.aspectRatio = val;
+    if (key == "sr" || key == "sample_rate") out.sampleRate = std::max(0, parseIntSafe(val, out.sampleRate));
+    if (key == "threads") out.threads = std::max(0, parseIntSafe(val, out.threads));
+    if (key == "cs" || key == "color_space") out.colorSpace = val;
 }
 
 std::string stripVirtualSuffix(const std::string& path) {
@@ -496,6 +514,26 @@ csSDK_int32 FileProbe::populateFileInfo(const std::vector<StreamInfo>& streams, 
         populateAudioStreamInfo(*audio, infoRec);
     }
     return kImNoErr;
+}
+
+
+void FileProbe::applyModifiersToStreams(const FilenameModifiers& mods, std::vector<StreamInfo>& streams) {
+    for (auto& st : streams) {
+        if (st.type == MediaType::Video) {
+            if (mods.width > 0 || mods.height > 0) {
+                int32_t w = mods.width;
+                int32_t h = mods.height;
+                FilenameModifiers::resolveAspectRatio(st.width, st.height, w, h);
+                if (w > 0) st.width = w;
+                if (h > 0) st.height = h;
+            }
+            if (mods.frameRate.num > 0 && mods.frameRate.den > 0) {
+                st.frameRate = mods.frameRate;
+            }
+        } else if (st.type == MediaType::Audio && mods.sampleRate > 0) {
+            st.sampleRate = mods.sampleRate;
+        }
+    }
 }
 
 } // namespace openmedia::importer

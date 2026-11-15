@@ -8,6 +8,9 @@
 #include <array>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <mutex>
+#include <sstream>
 #include <deque>
 #include <limits>
 #include <utility>
@@ -81,10 +84,24 @@ struct CodecMapEntry {
     AVCodecID avCodecId;
 };
 
-/// @brief Supported software video decoders (AV1 via libdav1d, VP9 via libvpx-vp9).
-constexpr std::array<CodecMapEntry, 2> kCodecTable{{
+/// @brief Supported software video decoders (all Influx v1.7.1 + v2.0.0beta1 codecs).
+constexpr std::array<CodecMapEntry, 16> kCodecTable{{
     {CodecId::AV1, "libdav1d", AV_CODEC_ID_AV1},
     {CodecId::VP9, "libvpx-vp9", AV_CODEC_ID_VP9},
+    {CodecId::VP8, "libvpx", AV_CODEC_ID_VP8},
+    {CodecId::H264, "h264", AV_CODEC_ID_H264},
+    {CodecId::HEVC, "hevc", AV_CODEC_ID_HEVC},
+    {CodecId::VVC, "vvc", AV_CODEC_ID_VVC},
+    {CodecId::ProRes, "prores", AV_CODEC_ID_PRORES},
+    {CodecId::FFV1, "ffv1", AV_CODEC_ID_FFV1},
+    {CodecId::HAP, "hap", AV_CODEC_ID_HAP},
+    {CodecId::DXV, "dxv", AV_CODEC_ID_DXV},
+    {CodecId::Canopus, "cfhd", AV_CODEC_ID_CFHD},
+    {CodecId::Bink, "binkvideo", AV_CODEC_ID_BINKVIDEO},
+    {CodecId::MJPEG, "mjpeg", AV_CODEC_ID_MJPEG},
+    {CodecId::QOI, "qoi", AV_CODEC_ID_QOI},
+    {CodecId::WebP, "webp", AV_CODEC_ID_WEBP},
+    {CodecId::APNG, "apng", AV_CODEC_ID_APNG},
 }};
 
 /// @brief Static mapping entry for hardware decode backends.
@@ -820,6 +837,85 @@ const std::string& CoreVideoDecoder::lastDiagnosticMessage() const noexcept {
         return kEmptyMsg;
     }
     return impl_->diagnosticMessage;
+}
+
+
+namespace {
+
+std::mutex& telemetryMutex() {
+    static std::mutex mtx;
+    return mtx;
+}
+
+std::vector<OpenMediaFrameDecodeTelemetry>& telemetryStore() {
+    static std::vector<OpenMediaFrameDecodeTelemetry> store;
+    return store;
+}
+
+std::string escapeTelemetryJson(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char ch : s) {
+        if (ch == '"' || ch == '\\') {
+            out.push_back('\\');
+        }
+        out.push_back(ch);
+    }
+    return out;
+}
+
+} // namespace
+
+void publishDecodeTelemetry(const OpenMediaFrameDecodeTelemetry& entry) {
+    std::lock_guard<std::mutex> lock(telemetryMutex());
+    auto& store = telemetryStore();
+    for (auto& existing : store) {
+        if (existing.fileId == entry.fileId && existing.filePath == entry.filePath) {
+            existing = entry;
+            return;
+        }
+    }
+    store.push_back(entry);
+}
+
+std::vector<OpenMediaFrameDecodeTelemetry> getActiveDecodeTelemetrySnapshot() {
+    std::lock_guard<std::mutex> lock(telemetryMutex());
+    return telemetryStore();
+}
+
+void clearDecodeTelemetry() {
+    std::lock_guard<std::mutex> lock(telemetryMutex());
+    telemetryStore().clear();
+}
+
+bool writeTelemetryJsonSnapshot(const std::string& jsonPath) {
+    if (jsonPath.empty()) {
+        return false;
+    }
+    const auto snapshot = getActiveDecodeTelemetrySnapshot();
+    std::ofstream ofs(jsonPath, std::ios::trunc);
+    if (!ofs.is_open()) {
+        return false;
+    }
+    ofs << "{\n  \"streams\": [\n";
+    for (size_t i = 0; i < snapshot.size(); ++i) {
+        const auto& e = snapshot[i];
+        ofs << "    {\n"
+            << "      \"fileId\": " << e.fileId << ",\n"
+            << "      \"filePath\": \"" << escapeTelemetryJson(e.filePath) << "\",\n"
+            << "      \"hostAppName\": \"" << escapeTelemetryJson(e.hostAppName) << "\",\n"
+            << "      \"codecName\": \"" << escapeTelemetryJson(e.codecName) << "\",\n"
+            << "      \"width\": " << e.width << ",\n"
+            << "      \"height\": " << e.height << ",\n"
+            << "      \"pixelFormat\": \"" << escapeTelemetryJson(e.pixelFormat) << "\",\n"
+            << "      \"colorSpace\": \"" << escapeTelemetryJson(e.colorSpace) << "\",\n"
+            << "      \"decodedOnGpu\": " << (e.decodedOnGpu ? "true" : "false") << ",\n"
+            << "      \"activeBackend\": \"" << escapeTelemetryJson(e.activeBackend) << "\",\n"
+            << "      \"policyReason\": \"" << escapeTelemetryJson(e.policyReason) << "\"\n"
+            << "    }" << (i + 1 < snapshot.size() ? "," : "") << "\n";
+    }
+    ofs << "  ]\n}\n";
+    return ofs.good();
 }
 
 } // namespace openmedia

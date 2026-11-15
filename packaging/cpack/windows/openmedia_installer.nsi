@@ -1,10 +1,10 @@
-; OpenMedia Premiere Pro & Media Encoder Plugin v2.0.0 — Native Windows x64 NSIS Installer
+; OpenMedia Premiere Pro & Media Encoder Plugin v3.0.0 — Native Windows x64 NSIS Installer
 ; Installs Dual-PRM Importers, Exporter, OpenMediaCore.dll, FFmpeg Runtime DLLs, and Config.toml to MediaCore 7.0
 
 !include "MUI2.nsh"
 !include "x64.nsh"
 
-Name "OpenMedia Premiere Pro & Media Encoder Plugin v2.0.0"
+Name "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.0"
 OutFile "${OUTFILE}"
 InstallDir "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore"
 RequestExecutionLevel admin
@@ -57,12 +57,12 @@ Section "OpenMedia MediaCore 7.0 Plugins" SecMain
 
   WriteUninstaller "$INSTDIR\Uninstall-OpenMedia.exe"
 
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "OpenMedia Premiere Pro & Media Encoder Plugin v2.0.0 (x64)"
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.0 (x64)"
   WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" "$\"$INSTDIR\Uninstall-OpenMedia.exe$\""
   WriteRegStr HKLM "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\Uninstall-OpenMedia.exe$\" /S"
   WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "OpenMedia Project"
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "2.0.0"
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "3.0.0"
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
 SectionEnd

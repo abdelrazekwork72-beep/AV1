@@ -55,7 +55,16 @@ enum class CodecId {
     AAC,
     MP3,
     AC3,
-    DTS
+    DTS,
+    VVC,
+    HAP,
+    DXV,
+    Canopus,
+    Bink,
+    MJPEG,
+    QOI,
+    WebP,
+    APNG
 };
 
 /// @brief Supported pixel formats for raw decoded/encoded video frames.
@@ -298,5 +307,33 @@ public:
     /// @brief Finalizes Cues/SeekHead trailer and closes the output container.
     virtual CoreStatus writeTrailerAndClose() = 0;
 };
+
+
+/// @brief Per-stream hardware/software decode telemetry snapshot (Influx v2.0 GPU Status parity).
+struct OpenMediaFrameDecodeTelemetry {
+    uint64_t fileId = 0;            ///< Unique open media file session identifier.
+    std::string filePath;           ///< UTF-8 path to the opened media file.
+    std::string hostAppName;        ///< Host name ("Premiere Pro", "After Effects", "Media Encoder", "Desktop").
+    std::string codecName;          ///< Video codec name (e.g., "av1", "hevc", "h264", "vp9", "prores").
+    uint32_t width = 0;             ///< Decoded frame width in pixels.
+    uint32_t height = 0;            ///< Decoded frame height in pixels.
+    std::string pixelFormat;        ///< Active pixel format name.
+    std::string colorSpace;         ///< Active color space name.
+    bool decodedOnGpu = false;      ///< True when hardware decode is active.
+    std::string activeBackend;      ///< Backend label ("NVDEC (CUDA)", "D3D11VA", "Vulkan", "VideoToolbox", "CPU").
+    std::string policyReason;       ///< Human-readable admission or fallback reason.
+};
+
+/// @brief Publishes or updates a live decode telemetry entry for the Desktop GPU Status monitor.
+void publishDecodeTelemetry(const OpenMediaFrameDecodeTelemetry& entry);
+
+/// @brief Returns a snapshot of all currently tracked decode telemetry entries.
+std::vector<OpenMediaFrameDecodeTelemetry> getActiveDecodeTelemetrySnapshot();
+
+/// @brief Clears all tracked decode telemetry entries (e.g., on host shutdown or test reset).
+void clearDecodeTelemetry();
+
+/// @brief Writes the active decode telemetry snapshot to a JSON file on disk.
+bool writeTelemetryJsonSnapshot(const std::string& jsonPath);
 
 } // namespace openmedia

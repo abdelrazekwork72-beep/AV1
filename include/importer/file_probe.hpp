@@ -47,6 +47,12 @@ struct OpenMediaConfig {
     bool disableThumbnailCache = false;
     ThumbnailTimecodeMode thumbnailTimecode = ThumbnailTimecodeMode::AlwaysShow;
     DurationCalculationMode durationCalculation = DurationCalculationMode::Metadata;
+    std::string uiLanguage = "en";
+    std::string importPolicy = "recommended_fallback";
+    bool debugLogs = false;
+    bool disableMultithreading = false;
+    bool disableFrameCache = false;
+    int32_t maxLogFileSizeMB = 25;
 
     /// @brief Parses Config.toml content into an OpenMediaConfig struct.
     static OpenMediaConfig parseConfigToml(const std::string& tomlContent);
@@ -72,6 +78,10 @@ struct FilenameModifiers {
     openmedia::ColorRange colorRange = openmedia::ColorRange::Unspecified;
     bool accurateDuration = false;
     bool resetFirstTimestamp = false;
+    std::string aspectRatio;
+    int32_t sampleRate = 0;
+    int32_t threads = 0;
+    std::string colorSpace;
     std::string cleanPath;
 
     /// @brief Parses filename suffix modifiers after the last '!' before the extension (including .influx / .openmedia).
@@ -110,6 +120,7 @@ public:
     static bool shouldDelegateToNative(const std::vector<StreamInfo>& streams, const std::string& ext);
     static csSDK_int32 openAndProbe(ImOpenFileRec8Ext& openRec, ICoreDemuxer& demuxer);
     static csSDK_int32 populateFileInfo(const std::vector<StreamInfo>& streams, ImFileInfoRec8Ext& infoRec);
+    static void applyModifiersToStreams(const FilenameModifiers& mods, std::vector<StreamInfo>& streams);
 };
 
 } // namespace openmedia::importer

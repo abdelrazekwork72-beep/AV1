@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenMediaPremierePlugin VERSION 2.0.0 LANGUAGES CXX)
+project(OpenMediaPremierePlugin VERSION 3.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -232,6 +232,37 @@ openmedia_apply_simd_and_security(OpenMedia_ImporterHP)
 openmedia_configure_plugin_platform(OpenMedia_ImporterHP)
 openmedia_add_plugin_target(OpenMedia_Exporter "exporter")
 
+
+# Module 5: Bilingual (EN LTR / AR RTL) Desktop Control Center & Host Popup (OpenMediaDesktop.exe)
+add_library(OpenMediaDesktopLib STATIC
+    src/desktop/i18n_engine.cpp
+    src/desktop/config_toml_editor.cpp
+    src/desktop/gpu_status_monitor.cpp
+    src/desktop/plugin_health_guide.cpp
+    src/desktop/cache_log_manager.cpp
+    src/desktop/suffix_modifier_builder.cpp
+    src/desktop/desktop_main_window.cpp
+)
+target_include_directories(OpenMediaDesktopLib PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tests/mocks/mock_sdk/Examples/Headers"
+)
+target_link_libraries(OpenMediaDesktopLib PUBLIC OpenMedia_Importer_obj OpenMediaCore)
+if(WIN32)
+    target_link_libraries(OpenMediaDesktopLib PUBLIC user32 gdi32 comctl32 shell32 comdlg32 ole32)
+endif()
+openmedia_apply_warnings(OpenMediaDesktopLib)
+openmedia_apply_simd_and_security(OpenMediaDesktopLib)
+
+if(WIN32)
+    add_executable(OpenMediaDesktop WIN32 src/desktop/main_desktop.cpp)
+else()
+    add_executable(OpenMediaDesktop src/desktop/main_desktop.cpp)
+endif()
+target_link_libraries(OpenMediaDesktop PRIVATE OpenMediaDesktopLib)
+openmedia_apply_warnings(OpenMediaDesktop)
+openmedia_apply_simd_and_security(OpenMediaDesktop)
+
 enable_testing()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/build/test_cmake_targets.cmake")
@@ -322,6 +353,30 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/exporter")
     endforeach()
 endif()
 
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop")
+    file(GLOB OPENMEDIA_DESKTOP_TESTS CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop/test_*.cpp"
+    )
+    foreach(test_src IN LISTS OPENMEDIA_DESKTOP_TESTS)
+        get_filename_component(test_name "${test_src}" NAME_WE)
+        add_executable("${test_name}" "${test_src}")
+        target_link_libraries("${test_name}" PRIVATE OpenMediaDesktopLib)
+        openmedia_apply_warnings("${test_name}")
+        openmedia_enable_test_assertions("${test_name}")
+        add_test(
+            NAME "${test_name}"
+            COMMAND "${test_name}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        )
+    endforeach()
+    add_test(
+        NAME test_desktop_headless_self_test
+        COMMAND OpenMediaDesktop --headless-self-test
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+endif()
+
 # Module 4: MediaCore Host Integration & Benchmark Harness (US-4.1.0)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/integration")
     add_library(openmedia_integration_harness STATIC
@@ -395,7 +450,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py")
     endif()
 endif()
 
-install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_ImporterHP OpenMedia_Exporter
+install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_ImporterHP OpenMedia_Exporter OpenMediaDesktop
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .
     BUNDLE DESTINATION .

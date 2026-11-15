@@ -67,6 +67,9 @@ public:
                             int64_t frame,
                             ThumbnailCacheEntry& outEntry) const;
 
+    /// @brief Purges all cached thumbnails from the SQLite STRICT cache file (VACUUM).
+    bool purgeThumbnailDatabase(const std::string& dbPath);
+
 private:
     static uint64_t makeKey(uint32_t mediaId, int64_t frameIndex) noexcept;
 

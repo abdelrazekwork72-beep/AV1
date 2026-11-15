@@ -47,7 +47,7 @@ void testImGetIndFormatRegistration() {
     }
 
     ImIndFormatRecExt oobRec{};
-    assert(xImportEntry(kSelGetIndFormat, &stdParms, reinterpret_cast<void*>(static_cast<std::intptr_t>(7)), &oobRec) == kImBadFormatIndex);
+    assert(xImportEntry(kSelGetIndFormat, &stdParms, reinterpret_cast<void*>(static_cast<std::intptr_t>(39)), &oobRec) == kImBadFormatIndex);
     assert(xImportEntry(kSelGetIndFormat, &stdParms, reinterpret_cast<void*>(static_cast<std::intptr_t>(-1)), &oobRec) == kImBadFormatIndex);
     assert(xImportEntry(kSelGetIndFormat, &stdParms, reinterpret_cast<void*>(static_cast<std::intptr_t>(0)), nullptr) == kImMemErr);
 }

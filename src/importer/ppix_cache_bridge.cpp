@@ -162,13 +162,36 @@ bool PPixCacheBridge::saveThumbnailCache(const std::string& dbPath, const Thumbn
         return false;
     }
     std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<ThumbnailCacheEntry> entries;
+    {
+        std::ifstream ifs(dbPath, std::ios::binary);
+        if (ifs.is_open()) {
+            char magic[8]{};
+            int32_t version = 0;
+            if (ifs.read(magic, sizeof(magic)) &&
+                std::memcmp(magic, kStrictCacheMagic, sizeof(magic)) == 0 &&
+                readPod(ifs, version) && version == kThumbnailSchemaVersion) {
+                ThumbnailCacheEntry existing;
+                while (readEntryRecord(ifs, existing)) {
+                    if (!matchesEntry(existing, entry.path, entry.width, entry.height, entry.frame)) {
+                        entries.push_back(std::move(existing));
+                    }
+                    existing = ThumbnailCacheEntry{};
+                }
+            }
+        }
+    }
+    entries.push_back(entry);
+
     std::ofstream ofs(dbPath, std::ios::binary | std::ios::trunc);
     if (!ofs.is_open()) {
         return false;
     }
     ofs.write(kStrictCacheMagic, sizeof(kStrictCacheMagic));
     writePod(ofs, kThumbnailSchemaVersion);
-    writeEntryRecord(ofs, entry);
+    for (const auto& item : entries) {
+        writeEntryRecord(ofs, item);
+    }
     return ofs.good();
 }
 
@@ -195,14 +218,28 @@ bool PPixCacheBridge::loadThumbnailCache(const std::string& dbPath,
         return false;
     }
     ThumbnailCacheEntry candidate;
-    if (!readEntryRecord(ifs, candidate)) {
+    while (readEntryRecord(ifs, candidate)) {
+        if (matchesEntry(candidate, mediaPath, width, height, frame)) {
+            outEntry = std::move(candidate);
+            return true;
+        }
+        candidate = ThumbnailCacheEntry{};
+    }
+    return false;
+}
+
+bool PPixCacheBridge::purgeThumbnailDatabase(const std::string& dbPath) {
+    if (dbPath.empty()) {
         return false;
     }
-    if (!matchesEntry(candidate, mediaPath, width, height, frame)) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::ofstream ofs(dbPath, std::ios::binary | std::ios::trunc);
+    if (!ofs.is_open()) {
         return false;
     }
-    outEntry = std::move(candidate);
-    return true;
+    ofs.write(kStrictCacheMagic, sizeof(kStrictCacheMagic));
+    writePod(ofs, kThumbnailSchemaVersion);
+    return ofs.good();
 }
 
 } // namespace openmedia::importer
