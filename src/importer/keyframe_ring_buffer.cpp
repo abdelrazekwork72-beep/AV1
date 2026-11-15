@@ -1,3 +1,6 @@
+/// @file keyframe_ring_buffer.cpp
+/// @brief Implementation of KeyframeRingBuffer with exact-frame Long-GOP / open-GOP seeking.
+
 #include "importer/keyframe_ring_buffer.hpp"
 
 #include <algorithm>
@@ -30,6 +33,23 @@ bool KeyframeRingBuffer::findPrecedingKeyframe(int64_t targetPts, KeyframeEntry&
     }
     --it;
     outEntry = *it;
+    return true;
+}
+
+bool KeyframeRingBuffer::seekExactFrame(int64_t targetPts, KeyframeEntry& outAnchor) const noexcept {
+    if (keyframes_.empty()) {
+        return false;
+    }
+    auto it = std::upper_bound(
+        keyframes_.begin(), keyframes_.end(), targetPts,
+        [](int64_t val, const KeyframeEntry& e) { return val < e.pts; });
+    if (it != keyframes_.begin()) {
+        --it;
+    }
+    if (it->isOpenGop && it != keyframes_.begin() && targetPts == it->pts) {
+        --it;
+    }
+    outAnchor = *it;
     return true;
 }
 

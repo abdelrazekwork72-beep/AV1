@@ -1,6 +1,6 @@
 #pragma once
 /// @file keyframe_ring_buffer.hpp
-/// @brief Sparse O(log N) keyframe seek index and circular decoded-frame ring buffer.
+/// @brief Sparse O(log N) keyframe seek index, exact-frame Long-GOP/open-GOP seek, and ring buffer.
 
 #include "openmedia/video_decoder.hpp"
 
@@ -9,48 +9,30 @@
 
 namespace openmedia::importer {
 
-/// @brief Sparse keyframe entry supporting CFR and VFR timestamps.
+/// @brief Sparse keyframe entry supporting CFR, VFR, and open-GOP timestamps.
 struct KeyframeEntry {
-    int64_t pts = 0;        ///< Presentation timestamp in stream timebase units.
-    int64_t frameIndex = 0; ///< Zero-based frame index.
-    int64_t byteOffset = 0; ///< Byte offset in container for fast seek.
+    int64_t pts = 0;
+    int64_t frameIndex = 0;
+    int64_t byteOffset = 0;
+    bool isOpenGop = false;
 };
 
 /// @brief Maintains O(log N) keyframe lookup and a fixed-capacity circular decoded-frame ring.
 class KeyframeRingBuffer {
 public:
-    /// @brief Construct ring buffer with specified frame slot capacity.
-    /// @param capacity Maximum number of decoded frames held in the ring.
     explicit KeyframeRingBuffer(size_t capacity = 32) noexcept;
 
-    /// @brief Append a keyframe entry in monotonically non-decreasing PTS order.
-    /// @param entry Keyframe metadata.
-    /// @return true if inserted, false if out-of-order.
     bool addKeyframe(const KeyframeEntry& entry);
-
-    /// @brief Find the nearest preceding keyframe at or before targetPts in O(log N).
-    /// @param targetPts Target timestamp.
-    /// @param outEntry Receives matching keyframe.
-    /// @return true if found, false if index is empty.
     bool findPrecedingKeyframe(int64_t targetPts, KeyframeEntry& outEntry) const noexcept;
 
-    /// @brief Push a decoded frame into the circular ring buffer, overwriting oldest if full.
-    /// @param frame Decoded video frame.
-    void pushFrame(const RawVideoFrame& frame);
+    /// @brief Finds the exact decode-start keyframe for Long-GOP / open-GOP streams (AVCHD/MTS, MXF, H.264/HEVC, AV1).
+    bool seekExactFrame(int64_t targetPts, KeyframeEntry& outAnchor) const noexcept;
 
-    /// @brief Look up a decoded frame by PTS in the circular ring.
-    /// @param pts Target presentation timestamp.
-    /// @param outFrame Output frame copy.
-    /// @return true on ring hit, false on miss.
+    void pushFrame(const RawVideoFrame& frame);
     bool findBufferedFrame(int64_t pts, RawVideoFrame& outFrame) const;
 
-    /// @brief Return number of indexed keyframes.
     size_t keyframeCount() const noexcept { return keyframes_.size(); }
-
-    /// @brief Return current number of frames stored in the ring.
     size_t bufferedCount() const noexcept { return count_; }
-
-    /// @brief Clear both keyframe index and ring slots.
     void clear() noexcept;
 
 private:
