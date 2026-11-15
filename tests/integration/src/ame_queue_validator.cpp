@@ -100,4 +100,12 @@ AmeBatchReport AmeQueueValidator::runBatchQueueValidation(
     return report;
 }
 
+bool AmeQueueValidator::validateConfigTomlPolicy(const std::string& tomlContent) noexcept {
+    return tomlContent.find("[decode_policy]") != std::string::npos &&
+           tomlContent.find("gpu_min_width = 2560") != std::string::npos &&
+           tomlContent.find("gpu_min_height = 1600") != std::string::npos &&
+           tomlContent.find("max_gpu_streams = 4") != std::string::npos &&
+           tomlContent.find("[dual_prm]") != std::string::npos;
+}
+
 } // namespace openmedia::integration
