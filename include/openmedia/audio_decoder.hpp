@@ -22,8 +22,11 @@ inline float convertInt16ToFloat32(int16_t sample) noexcept {
 }
 
 /// @brief Concrete FFmpeg-backed audio decoder producing 32-bit float planar batches.
-/// @details Supports Opus, FLAC, Vorbis, and PCM streams up to 32 channels,
+/// @details Supports Opus, FLAC, Vorbis, PCM (including 5-channel and 6-channel MOV/MKV
+///          layouts), xHE-AAC, AAC, MP3, AC3, and DTS streams up to 32 channels,
 ///          resampling decoded output to AV_SAMPLE_FMT_FLTP via libswresample.
+///          Tolerates isolated corrupted packets via 0.0f planar float silence substitution
+///          and synthesizes planar float silence for zero-packet declared audio tracks.
 class CoreAudioDecoder final : public ICoreAudioDecoder {
 public:
     /// @brief Constructs an uninitialized CoreAudioDecoder instance.
@@ -51,9 +54,11 @@ public:
     CoreStatus initialize(const StreamInfo& stream, int32_t targetSampleRate = 48000) override;
 
     /// @brief Submits a compressed audio packet to the decoder.
+    /// @details Isolated corrupted packets are tolerated by substituting zero-filled
+    ///          planar float silence (0.0f) rather than aborting the import.
     /// @param packet Compressed bitstream packet to decode.
     /// @return CoreStatus::Ok on success, CoreStatus::NeedMoreData if decoder buffers are full,
-    ///         or an error status on failure.
+    ///         or an error status on uninitialized/invalid state.
     CoreStatus sendPacket(const EncodedPacket& packet) override;
 
     /// @brief Decodes and resamples up to maxSamples frames into 32-bit float planar output.
@@ -64,6 +69,8 @@ public:
     CoreStatus decodeAudioBatch(int32_t maxSamples, RawAudioBatch& outBatch) override;
 
     /// @brief Signals end-of-stream to drain buffered decoder and resampler samples.
+    /// @details If zero packets were submitted for the declared audio track, synthesizes
+    ///          planar float silence (0.0f) so empty tracks do not fail import.
     /// @return CoreStatus::Ok on success, or an error status if flushing fails.
     CoreStatus flush() override;
 
