@@ -8,7 +8,7 @@ if [[ ! -d "${MEDIACORE_DIR}" ]]; then
   exit 0
 fi
 
-for bundle in "OpenMedia_Importer.bundle" "OpenMedia_Exporter.bundle"; do
+for bundle in "OpenMedia_Importer.bundle" "OpenMedia_ImporterHP.bundle" "OpenMedia_Exporter.bundle"; do
   bundle_path="${MEDIACORE_DIR}/${bundle}"
   if [[ -d "${bundle_path}" ]]; then
     chmod 0755 "${bundle_path}"
@@ -22,4 +22,8 @@ done
 
 if [[ -f "${MEDIACORE_DIR}/libOpenMediaCore.dylib" ]]; then
   chmod 0755 "${MEDIACORE_DIR}/libOpenMediaCore.dylib"
+fi
+
+if [[ -f "${MEDIACORE_DIR}/Config.toml" ]]; then
+  chmod 0644 "${MEDIACORE_DIR}/Config.toml"
 fi
