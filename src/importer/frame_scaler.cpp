@@ -1,5 +1,5 @@
 /// @file frame_scaler.cpp
-/// @brief Implementation of FrameScaler with cached SwsContext and Rec.601/709/2020 matrices.
+/// @brief Implementation of FrameScaler with cached SwsContext, NV12/P010 fast-path, and extended color spaces.
 
 #include "importer/frame_scaler.hpp"
 
@@ -37,57 +37,40 @@ bool hasValidPlanes(const uint8_t* const planes[4],
     return planes[0] != nullptr && strides[0] > 0;
 }
 
+bool tryDirectGpuConversion(const ScaleConfig& config,
+                            const uint8_t* const srcPlanes[4],
+                            const int32_t srcStrides[4],
+                            uint8_t* const dstPlanes[4],
+                            const int32_t dstStrides[4]) noexcept {
+    if (config.srcWidth != config.dstWidth || config.srcHeight != config.dstHeight ||
+        config.dstFormat != openmedia::PixelFormat::BGRA8 || srcPlanes[1] == nullptr) {
+        return false;
+    }
+    if (config.srcFormat == openmedia::PixelFormat::NV12) {
+        return PixelFormatHdrEngine::convertNv12ToBgra8Direct(
+            srcPlanes[0], srcPlanes[1],
+            static_cast<uint32_t>(srcStrides[0]), static_cast<uint32_t>(srcStrides[1]),
+            static_cast<uint32_t>(config.srcWidth), static_cast<uint32_t>(config.srcHeight),
+            dstPlanes[0], static_cast<uint32_t>(dstStrides[0]),
+            config.colorRange == openmedia::ColorRange::Full);
+    }
+    if (config.srcFormat == openmedia::PixelFormat::P010LE) {
+        return PixelFormatHdrEngine::convertP010ToBgra8OrRgb444Direct(
+            reinterpret_cast<const uint16_t*>(srcPlanes[0]),
+            reinterpret_cast<const uint16_t*>(srcPlanes[1]),
+            static_cast<uint32_t>(srcStrides[0]) / 2U, static_cast<uint32_t>(srcStrides[1]) / 2U,
+            static_cast<uint32_t>(config.srcWidth), static_cast<uint32_t>(config.srcHeight),
+            dstPlanes[0], static_cast<uint32_t>(dstStrides[0]), false);
+    }
+    return false;
+}
+
 #ifndef OPENMEDIA_HAS_FFMPEG
 uint8_t clampByte(int32_t value) noexcept {
-    if (value < 0) {
-        return 0;
-    }
-    if (value > 255) {
-        return 255;
-    }
+    if (value < 0) return 0;
+    if (value > 255) return 255;
     return static_cast<uint8_t>(value);
 }
-#endif
-
-#ifdef OPENMEDIA_HAS_FFMPEG
-
-AVPixelFormat toAvPixelFormat(openmedia::PixelFormat fmt) noexcept {
-    struct AvFmtEntry {
-        openmedia::PixelFormat src;
-        AVPixelFormat dst;
-    };
-    static constexpr AvFmtEntry kTable[] = {
-        {openmedia::PixelFormat::YUV420P, AV_PIX_FMT_YUV420P},
-        {openmedia::PixelFormat::YUV422P, AV_PIX_FMT_YUV422P},
-        {openmedia::PixelFormat::YUV444P, AV_PIX_FMT_YUV444P},
-        {openmedia::PixelFormat::YUV420P10LE, AV_PIX_FMT_YUV420P10LE},
-        {openmedia::PixelFormat::YUV422P10LE, AV_PIX_FMT_YUV422P10LE},
-        {openmedia::PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV444P10LE},
-        {openmedia::PixelFormat::YUV420P12LE, AV_PIX_FMT_YUV420P12LE},
-        {openmedia::PixelFormat::YUV422P12LE, AV_PIX_FMT_YUV422P12LE},
-        {openmedia::PixelFormat::YUV444P12LE, AV_PIX_FMT_YUV444P12LE},
-        {openmedia::PixelFormat::BGRA8, AV_PIX_FMT_BGRA},
-        {openmedia::PixelFormat::RGBA8, AV_PIX_FMT_RGBA},
-        {openmedia::PixelFormat::NV12, AV_PIX_FMT_NV12},
-        {openmedia::PixelFormat::P010LE, AV_PIX_FMT_P010LE},
-    };
-    for (const auto& entry : kTable) {
-        if (entry.src == fmt) {
-            return entry.dst;
-        }
-    }
-    return AV_PIX_FMT_NONE;
-}
-
-void applySwsColorspace(SwsContext* ctx,
-                        ColorMatrix matrix,
-                        openmedia::ColorRange range) noexcept {
-    const int* table = sws_getCoefficients(FrameScaler::toSwsColorspaceId(matrix));
-    const int srcRange = (range == openmedia::ColorRange::Full) ? 1 : 0;
-    sws_setColorspaceDetails(ctx, table, srcRange, table, 1, 0, 1 << 16, 1 << 16);
-}
-
-#else
 
 struct YuvRgbCoeffs {
     int32_t crToR;
@@ -132,15 +115,11 @@ void convertYuv420Row(const uint8_t* yRow,
         const int32_t yVal = static_cast<int32_t>(yRow[srcX]) - yOffset;
         const int32_t uVal = static_cast<int32_t>(uRow[srcX / 2]) - 128;
         const int32_t vVal = static_cast<int32_t>(vRow[srcX / 2]) - 128;
-
         const int32_t r = yVal + ((coeffs.crToR * vVal) >> 10);
         const int32_t g = yVal - ((coeffs.cbToG * uVal + coeffs.crToG * vVal) >> 10);
         const int32_t b = yVal + ((coeffs.cbToB * uVal) >> 10);
         writeFallbackPixel(dstRow + static_cast<size_t>(x) * 4U,
-                           config.dstFormat,
-                           clampByte(r),
-                           clampByte(g),
-                           clampByte(b));
+                           config.dstFormat, clampByte(r), clampByte(g), clampByte(b));
     }
 }
 
@@ -175,8 +154,36 @@ void fallbackCopyRows(const ScaleConfig& config,
                     static_cast<size_t>(copyWidth));
     }
 }
+#else
+AVPixelFormat toAvPixelFormat(openmedia::PixelFormat fmt) noexcept {
+    struct AvFmtEntry { openmedia::PixelFormat src; AVPixelFormat dst; };
+    static constexpr AvFmtEntry kTable[] = {
+        {openmedia::PixelFormat::YUV420P, AV_PIX_FMT_YUV420P},
+        {openmedia::PixelFormat::YUV422P, AV_PIX_FMT_YUV422P},
+        {openmedia::PixelFormat::YUV444P, AV_PIX_FMT_YUV444P},
+        {openmedia::PixelFormat::YUV420P10LE, AV_PIX_FMT_YUV420P10LE},
+        {openmedia::PixelFormat::YUV422P10LE, AV_PIX_FMT_YUV422P10LE},
+        {openmedia::PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV444P10LE},
+        {openmedia::PixelFormat::YUV420P12LE, AV_PIX_FMT_YUV420P12LE},
+        {openmedia::PixelFormat::YUV422P12LE, AV_PIX_FMT_YUV422P12LE},
+        {openmedia::PixelFormat::YUV444P12LE, AV_PIX_FMT_YUV444P12LE},
+        {openmedia::PixelFormat::BGRA8, AV_PIX_FMT_BGRA},
+        {openmedia::PixelFormat::RGBA8, AV_PIX_FMT_RGBA},
+        {openmedia::PixelFormat::NV12, AV_PIX_FMT_NV12},
+        {openmedia::PixelFormat::P010LE, AV_PIX_FMT_P010LE},
+    };
+    for (const auto& entry : kTable) {
+        if (entry.src == fmt) return entry.dst;
+    }
+    return AV_PIX_FMT_NONE;
+}
 
-#endif // OPENMEDIA_HAS_FFMPEG
+void applySwsColorspace(SwsContext* ctx, ColorMatrix matrix, openmedia::ColorRange range) noexcept {
+    const int* table = sws_getCoefficients(FrameScaler::toSwsColorspaceId(matrix));
+    const int srcRange = (range == openmedia::ColorRange::Full) ? 1 : 0;
+    sws_setColorspaceDetails(ctx, table, srcRange, table, 1, 0, 1 << 16, 1 << 16);
+}
+#endif
 
 } // namespace
 
@@ -202,37 +209,7 @@ struct FrameScaler::Impl {
 
     bool ensureContext(const ScaleConfig& config) noexcept {
 #ifdef OPENMEDIA_HAS_FFMPEG
-        const AVPixelFormat srcAvFmt = toAvPixelFormat(config.srcFormat);
-        const AVPixelFormat dstAvFmt = toAvPixelFormat(config.dstFormat);
-        if (srcAvFmt == AV_PIX_FMT_NONE || dstAvFmt == AV_PIX_FMT_NONE) {
-            return false;
-        }
-
-        const bool configChanged = (context == nullptr) || (cachedConfig != config);
-        SwsContext* nextCtx = sws_getCachedContext(
-            context,
-            config.srcWidth,
-            config.srcHeight,
-            srcAvFmt,
-            config.dstWidth,
-            config.dstHeight,
-            dstAvFmt,
-            SWS_BICUBIC,
-            nullptr,
-            nullptr,
-            nullptr);
-        if (nextCtx == nullptr) {
-            return false;
-        }
-
-        if (configChanged) {
-            ++cacheMisses;
-            cachedConfig = config;
-            applySwsColorspace(nextCtx, config.colorMatrix, config.colorRange);
-        }
-        context = nextCtx;
-        lastMatrix = config.colorMatrix;
-        return true;
+        return ensureSwsContext(config);
 #else
         if (!hasContext || cachedConfig != config) {
             hasContext = true;
@@ -243,20 +220,38 @@ struct FrameScaler::Impl {
         return true;
 #endif
     }
+#ifdef OPENMEDIA_HAS_FFMPEG
+    bool ensureSwsContext(const ScaleConfig& config) noexcept {
+        const AVPixelFormat srcAvFmt = toAvPixelFormat(config.srcFormat);
+        const AVPixelFormat dstAvFmt = toAvPixelFormat(config.dstFormat);
+        if (srcAvFmt == AV_PIX_FMT_NONE || dstAvFmt == AV_PIX_FMT_NONE) return false;
+        const bool configChanged = (context == nullptr) || (cachedConfig != config);
+        SwsContext* nextCtx = sws_getCachedContext(
+            context, config.srcWidth, config.srcHeight, srcAvFmt,
+            config.dstWidth, config.dstHeight, dstAvFmt,
+            SWS_BICUBIC, nullptr, nullptr, nullptr);
+        if (nextCtx == nullptr) return false;
+        if (configChanged) {
+            ++cacheMisses;
+            cachedConfig = config;
+            applySwsColorspace(nextCtx, config.colorMatrix, config.colorRange);
+        }
+        context = nextCtx;
+        lastMatrix = config.colorMatrix;
+        return true;
+    }
+#endif
 
     void executeScale(const ScaleConfig& config,
                       const uint8_t* const srcPlanes[4],
                       const int32_t srcStrides[4],
                       uint8_t* const dstPlanes[4],
                       const int32_t dstStrides[4]) noexcept {
+        if (tryDirectGpuConversion(config, srcPlanes, srcStrides, dstPlanes, dstStrides)) {
+            return;
+        }
 #ifdef OPENMEDIA_HAS_FFMPEG
-        sws_scale(context,
-                  srcPlanes,
-                  srcStrides,
-                  0,
-                  config.srcHeight,
-                  dstPlanes,
-                  dstStrides);
+        sws_scale(context, srcPlanes, srcStrides, 0, config.srcHeight, dstPlanes, dstStrides);
 #else
         if (config.srcFormat == openmedia::PixelFormat::YUV420P &&
             (config.dstFormat == openmedia::PixelFormat::BGRA8 ||
@@ -270,11 +265,8 @@ struct FrameScaler::Impl {
 };
 
 FrameScaler::FrameScaler() : impl_(std::make_unique<Impl>()) {}
-
 FrameScaler::~FrameScaler() = default;
-
 FrameScaler::FrameScaler(FrameScaler&& other) noexcept = default;
-
 FrameScaler& FrameScaler::operator=(FrameScaler&& other) noexcept = default;
 
 openmedia::CoreStatus FrameScaler::scale(const ScaleConfig& config,
@@ -291,7 +283,6 @@ openmedia::CoreStatus FrameScaler::scale(const ScaleConfig& config,
     if (!impl_->ensureContext(config)) {
         return openmedia::CoreStatus::DecodeFailed;
     }
-
     impl_->executeScale(config, srcPlanes, srcStrides, dstPlanes, dstStrides);
     ++impl_->scales;
     return openmedia::CoreStatus::Ok;
@@ -306,7 +297,6 @@ openmedia::CoreStatus FrameScaler::scaleFrame(const openmedia::RawVideoFrame& sr
     if (dstBuffer == nullptr || dstStride <= 0 || srcFrame.planes[0].empty()) {
         return openmedia::CoreStatus::InvalidArgument;
     }
-
     ScaleConfig config;
     config.srcWidth = srcFrame.width;
     config.srcHeight = srcFrame.height;
@@ -331,14 +321,11 @@ openmedia::CoreStatus FrameScaler::scaleFrame(const openmedia::RawVideoFrame& sr
     };
     uint8_t* dstPlanes[4] = {dstBuffer, nullptr, nullptr, nullptr};
     const int32_t dstStrides[4] = {dstStride, 0, 0, 0};
-
     return scale(config, srcPlanes, srcStrides, dstPlanes, dstStrides);
 }
 
 void FrameScaler::reset() noexcept {
-    if (!impl_) {
-        return;
-    }
+    if (!impl_) return;
 #ifdef OPENMEDIA_HAS_FFMPEG
     if (impl_->context != nullptr) {
         sws_freeContext(impl_->context);
@@ -353,21 +340,23 @@ void FrameScaler::reset() noexcept {
     impl_->lastMatrix = ColorMatrix::Rec709;
 }
 
-uint64_t FrameScaler::cacheMissCount() const noexcept {
-    return impl_ ? impl_->cacheMisses : 0;
-}
-
-uint64_t FrameScaler::scaleCount() const noexcept {
-    return impl_ ? impl_->scales : 0;
-}
-
-ColorMatrix FrameScaler::activeColorMatrix() const noexcept {
-    return impl_ ? impl_->lastMatrix : ColorMatrix::Rec709;
-}
+uint64_t FrameScaler::cacheMissCount() const noexcept { return impl_ ? impl_->cacheMisses : 0; }
+uint64_t FrameScaler::scaleCount() const noexcept { return impl_ ? impl_->scales : 0; }
+ColorMatrix FrameScaler::activeColorMatrix() const noexcept { return impl_ ? impl_->lastMatrix : ColorMatrix::Rec709; }
 
 ColorMatrix FrameScaler::mapColorSpace(openmedia::ColorSpace space) noexcept {
     if (space == openmedia::ColorSpace::BT601) return ColorMatrix::Rec601;
     if (space == openmedia::ColorSpace::BT2020_NCL || space == openmedia::ColorSpace::BT2020_CL) {
+        return ColorMatrix::Rec2020;
+    }
+    return ColorMatrix::Rec709;
+}
+
+ColorMatrix FrameScaler::mapExtendedColorSpace(ExtendedColorSpace space) noexcept {
+    if (space == ExtendedColorSpace::BT601) return ColorMatrix::Rec601;
+    if (space == ExtendedColorSpace::BT2020 ||
+        space == ExtendedColorSpace::BT2100_HLG ||
+        space == ExtendedColorSpace::BT2100_PQ) {
         return ColorMatrix::Rec2020;
     }
     return ColorMatrix::Rec709;
