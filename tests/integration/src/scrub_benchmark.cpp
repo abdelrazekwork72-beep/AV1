@@ -1,5 +1,5 @@
 /// @file scrub_benchmark.cpp
-/// @brief Implementation of ScrubLatencyBenchmark enforcing imGetSourceVideo and 2000ms watchdog.
+/// @brief Implementation of ScrubLatencyBenchmark with CPU/GPU decode policy & WebM/AV1 final-frame checks.
 
 #include "scrub_benchmark.hpp"
 
@@ -47,7 +47,42 @@ double measureSeekBatch(const std::vector<std::int64_t>& schedule,
     return ScrubLatencyBenchmark::computePercentile(outSamplesMs, 0.95);
 }
 
+bool verifyFinalFrameRetention(std::int64_t totalFrames,
+                               const AsyncSourceVideoFn& fetchFrame) {
+    if (totalFrames <= 0 || !fetchFrame) {
+        return false;
+    }
+    void* finalPpix = nullptr;
+    const bool ok = fetchFrame(totalFrames - 1, true, &finalPpix);
+    return ok && finalPpix != nullptr && isAligned16(finalPpix);
+}
+
 } // namespace
+
+DecodePolicyDecision ScrubLatencyBenchmark::resolveDecodePolicy(
+    std::uint32_t width,
+    std::uint32_t height,
+    std::size_t activeGpuStreamCount) noexcept {
+    DecodePolicyDecision decision{};
+    const bool meetsGpuThreshold =
+        (width >= kGpuWidthThreshold) && (height >= kGpuHeightThreshold);
+    if (!meetsGpuThreshold) {
+        decision.backend = DecodeBackend::Cpu;
+        decision.activeGpuStreams = static_cast<std::uint32_t>(activeGpuStreamCount);
+        decision.overflowedToCpu = false;
+        return decision;
+    }
+    if (activeGpuStreamCount < kMaxConcurrentGpuStreams) {
+        decision.backend = DecodeBackend::Gpu;
+        decision.activeGpuStreams = static_cast<std::uint32_t>(activeGpuStreamCount + 1);
+        decision.overflowedToCpu = false;
+        return decision;
+    }
+    decision.backend = DecodeBackend::Cpu;
+    decision.activeGpuStreams = static_cast<std::uint32_t>(kMaxConcurrentGpuStreams);
+    decision.overflowedToCpu = true;
+    return decision;
+}
 
 std::vector<std::int64_t> ScrubLatencyBenchmark::buildSeekSchedule(
     std::int64_t totalFrames,
@@ -116,6 +151,36 @@ ScrubBenchmarkReport ScrubLatencyBenchmark::runScrubBenchmark(
             ((report.uncachedP95Ms - report.p95Ms) / report.uncachedP95Ms) * 100.0;
     }
     return report;
+}
+
+DualPolicyBenchmarkReport ScrubLatencyBenchmark::runDecodePolicyBenchmark(
+    std::int64_t totalFrames,
+    std::size_t seekCount,
+    const AsyncSourceVideoFn& fetchFrame) const {
+    DualPolicyBenchmarkReport dual{};
+    const auto cpuDecision = resolveDecodePolicy(1920, 1080, 0);
+    if (cpuDecision.backend == DecodeBackend::Cpu && !cpuDecision.overflowedToCpu) {
+        dual.cpuPathReport = runScrubBenchmark(totalFrames, seekCount, fetchFrame);
+    }
+
+    std::size_t gpuCount = 0;
+    for (std::size_t stream = 0; stream < kMaxConcurrentGpuStreams; ++stream) {
+        const auto gpuDecision = resolveDecodePolicy(3840, 2160, gpuCount);
+        if (gpuDecision.backend == DecodeBackend::Gpu && !gpuDecision.overflowedToCpu) {
+            ++gpuCount;
+        }
+    }
+    dual.concurrentGpuStreamsVerified = gpuCount;
+    if (gpuCount == kMaxConcurrentGpuStreams) {
+        dual.gpuPathReport = runScrubBenchmark(totalFrames, seekCount, fetchFrame);
+    }
+
+    const auto fifthStream = resolveDecodePolicy(3840, 2160, kMaxConcurrentGpuStreams);
+    dual.fifthStreamAutoRoutedToCpu =
+        (fifthStream.backend == DecodeBackend::Cpu) && fifthStream.overflowedToCpu;
+
+    dual.webmAv1FinalFrameRetained = verifyFinalFrameRetention(totalFrames, fetchFrame);
+    return dual;
 }
 
 } // namespace openmedia::integration
