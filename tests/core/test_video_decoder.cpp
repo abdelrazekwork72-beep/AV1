@@ -108,7 +108,7 @@ void testInitializationValidation() {
 
     openmedia::StreamInfo unsupportedVideo;
     unsupportedVideo.type = openmedia::MediaType::Video;
-    unsupportedVideo.codec = openmedia::CodecId::ProRes;
+    unsupportedVideo.codec = openmedia::CodecId::Unknown;
     unsupportedVideo.width = 1920;
     unsupportedVideo.height = 1080;
     check(decoder.initialize(unsupportedVideo) == openmedia::CoreStatus::UnsupportedCodec,

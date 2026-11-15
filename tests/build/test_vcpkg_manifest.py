@@ -60,7 +60,7 @@ class TestVcpkgManifest(unittest.TestCase):
         self.assertEqual(manifest.get("name"), "openmedia-premiere-plugin")
         version_str = manifest.get("version-string", "")
         self.assertRegex(version_str, SEMVER_RE, "version-string must be valid semver")
-        self.assertEqual(version_str, "2.0.0")
+        self.assertEqual(version_str, "3.0.0")
         self.assertEqual(manifest.get("license"), "MIT AND LGPL-2.1-or-later")
 
         baseline = manifest.get("builtin-baseline", "")
