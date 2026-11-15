@@ -65,6 +65,7 @@ function(openmedia_configure_plugin_platform target_name)
             SUFFIX ".prm"
         )
         set(rc_OpenMedia_Importer "${CMAKE_CURRENT_SOURCE_DIR}/resources/importer_resources.rc")
+        set(rc_OpenMedia_ImporterHP "${CMAKE_CURRENT_SOURCE_DIR}/resources/importer_hp_resources.rc")
         set(rc_OpenMedia_Exporter "${CMAKE_CURRENT_SOURCE_DIR}/resources/exporter_resources.rc")
         set(rc_file "${rc_${target_name}}")
         if(NOT EXISTS "${rc_file}")
@@ -81,6 +82,7 @@ function(openmedia_configure_plugin_platform target_name)
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.openmedia.premiere.${target_name}"
         )
         set(plist_OpenMedia_Importer "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info_Importer.plist.in")
+        set(plist_OpenMedia_ImporterHP "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info_ImporterHP.plist.in")
         set(plist_OpenMedia_Exporter "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info_Exporter.plist.in")
         set(plist_in "${plist_${target_name}}")
         if(NOT EXISTS "${plist_in}")
@@ -174,6 +176,9 @@ if(OPENMEDIA_FFMPEG_FOUND)
 endif()
 
 openmedia_add_plugin_target(OpenMedia_Importer "importer")
+openmedia_add_plugin_target(OpenMedia_ImporterHP "importer")
+target_compile_definitions(OpenMedia_ImporterHP_obj PRIVATE OPENMEDIA_IMPORTER_HIGH_PRIORITY=1)
+target_compile_definitions(OpenMedia_ImporterHP PRIVATE OPENMEDIA_IMPORTER_HIGH_PRIORITY=1)
 openmedia_add_plugin_target(OpenMedia_Exporter "exporter")
 
 enable_testing()
@@ -339,7 +344,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py")
     endif()
 endif()
 
-install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_Exporter
+install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_ImporterHP OpenMedia_Exporter
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .
     BUNDLE DESTINATION .
