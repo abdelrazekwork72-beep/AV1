@@ -8,6 +8,9 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
@@ -309,11 +312,11 @@ LRESULT CALLBACK DesktopWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             } else if (id == kIdSaveConfig) {
                 wchar_t buf[64]{};
                 GetWindowTextW(st->gpuMinWEdit, buf, 64);
-                st->owner->config().maxFrameCacheSizeMB = std::max(0, std::atoi(toUtf8(buf).c_str()));
+                st->owner->config().maxFrameCacheSizeMB = static_cast<uint32_t>((std::max)(0, std::atoi(toUtf8(buf).c_str())));
                 GetWindowTextW(st->gpuMinHEdit, buf, 64);
-                st->owner->config().maxPercentUsageAvailableMemory = std::max(0, std::atoi(toUtf8(buf).c_str()));
+                st->owner->config().maxPercentUsageAvailableMemory = static_cast<uint32_t>((std::max)(0, std::atoi(toUtf8(buf).c_str())));
                 GetWindowTextW(st->maxGpuEdit, buf, 64);
-                st->owner->config().maxLogFileSizeMB = std::max(1, std::atoi(toUtf8(buf).c_str()));
+                st->owner->config().maxLogFileSizeMB = (std::max)(1, std::atoi(toUtf8(buf).c_str()));
                 const LRESULT pol = SendMessageW(st->policyCombo, CB_GETCURSEL, 0, 0);
                 static const char* kPolicies[4] = {
                     "force_override_all_adobe", "new_formats_codecs_and_fallback",

@@ -29,6 +29,9 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <shellapi.h>
 #endif
@@ -187,7 +190,7 @@ bool decodeNextAudioSamples(ImporterFileSession& session,
             outInterleaved.resize(avail * channels);
             for (size_t i = 0; i < avail; ++i) {
                 for (uint32_t ch = 0; ch < channels; ++ch) {
-                    const size_t srcCh = std::min<size_t>(ch, batch.channelData.size() - 1U);
+                    const size_t srcCh = (std::min<size_t>)(ch, batch.channelData.size() - 1U);
                     const float sample = (i < batch.channelData[srcCh].size())
                                              ? std::clamp(batch.channelData[srcCh][i], -1.0f, 1.0f)
                                              : 0.0f;
@@ -382,7 +385,7 @@ csSDK_int32 handleImGetPeakAudio(imStdParms* /*stdParms*/, void* param1, void* /
     if (auto session = findSession(rec->privatedata)) {
         std::vector<int16_t> pcm;
         if (decodeNextAudioSamples(*session, count, 1U, pcm) && !pcm.empty()) {
-            const size_t n = std::min(count, pcm.size());
+            const size_t n = (std::min)(count, pcm.size());
             for (size_t i = 0; i < n; ++i) {
                 samples[i] = static_cast<float>(pcm[i]) / 32767.0f;
             }
