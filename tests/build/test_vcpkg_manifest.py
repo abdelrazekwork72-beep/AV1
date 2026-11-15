@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HEX_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:#\d+)?$")
 EXPECTED_BASELINE = "382a945938bf804c0ecdd61c94297b7b2de2dc3b"
 REQUIRED_FFMPEG_FEATURES = {
     "avcodec",
@@ -20,8 +21,19 @@ REQUIRED_FFMPEG_FEATURES = {
     "vpx",
     "opus",
     "flac",
+    "vorbis",
+    "mp3lame",
     "nvcodec",
     "vulkan",
+}
+DISALLOWED_FFMPEG_FEATURES = {
+    "nonfree",
+    "all-nonfree",
+    "fdk-aac",
+    "gpl",
+    "all-gpl",
+    "x264",
+    "x265",
 }
 
 
@@ -46,7 +58,9 @@ class TestVcpkgManifest(unittest.TestCase):
             "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
         )
         self.assertEqual(manifest.get("name"), "openmedia-premiere-plugin")
-        self.assertEqual(manifest.get("version-string"), "1.0.0")
+        version_str = manifest.get("version-string", "")
+        self.assertRegex(version_str, SEMVER_RE, "version-string must be valid semver")
+        self.assertEqual(version_str, "1.0.0")
         self.assertEqual(manifest.get("license"), "MIT AND LGPL-2.1-or-later")
 
         baseline = manifest.get("builtin-baseline", "")
@@ -55,6 +69,17 @@ class TestVcpkgManifest(unittest.TestCase):
 
         dependencies = manifest.get("dependencies", [])
         self.assertIsInstance(dependencies, list)
+        self.assertGreater(len(dependencies), 0, "dependencies list must not be empty")
+
+        dep_names = [
+            dep.get("name") if isinstance(dep, dict) else dep
+            for dep in dependencies
+        ]
+        self.assertEqual(
+            len(dep_names),
+            len(set(dep_names)),
+            "dependencies must not contain duplicate package names",
+        )
 
         ffmpeg_deps = [
             dep for dep in dependencies if isinstance(dep, dict) and dep.get("name") == "ffmpeg"
@@ -64,6 +89,11 @@ class TestVcpkgManifest(unittest.TestCase):
 
         version_constraint = ffmpeg.get("version>=")
         self.assertIsInstance(version_constraint, str, "ffmpeg must specify version>=")
+        self.assertRegex(
+            version_constraint,
+            SEMVER_RE,
+            f"ffmpeg version>= must be valid semver, got {version_constraint}",
+        )
         self.assertGreaterEqual(
             parse_semver(version_constraint),
             (7, 1, 0),
@@ -71,9 +101,23 @@ class TestVcpkgManifest(unittest.TestCase):
         )
         self.assertIs(ffmpeg.get("default-features"), False)
 
-        features = set(ffmpeg.get("features", []))
+        raw_features = ffmpeg.get("features", [])
+        self.assertIsInstance(raw_features, list)
+        self.assertEqual(
+            len(raw_features),
+            len(set(raw_features)),
+            "ffmpeg features must not contain duplicates",
+        )
+
+        features = set(raw_features)
         missing = REQUIRED_FFMPEG_FEATURES - features
         self.assertFalse(missing, f"Missing required FFmpeg features: {sorted(missing)}")
+
+        disallowed = DISALLOWED_FFMPEG_FEATURES & features
+        self.assertFalse(
+            disallowed,
+            f"Disallowed GPL/nonfree FFmpeg features present: {sorted(disallowed)}",
+        )
 
     def test_vcpkg_configuration_json_valid(self) -> None:
         config_path = REPO_ROOT / "vcpkg-configuration.json"
