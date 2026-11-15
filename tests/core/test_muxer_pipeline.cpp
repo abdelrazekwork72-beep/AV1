@@ -35,7 +35,7 @@ const std::vector<uint8_t> kValidAv1InterPacket = {
 };
 
 const std::vector<uint8_t> kDummyAudioFrame = {
-    0xFFU, 0xF1U, 0x50U, 0x80U, 0x02U, 0x00U, 0xFCU
+    0xFCU, 0xFFU, 0xFEU, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U
 };
 
 void verifyRoundTripDemuxer(const std::string& containerPath) {

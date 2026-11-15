@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenMediaPremierePlugin VERSION 1.0.0 LANGUAGES CXX)
+project(OpenMediaPremierePlugin VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,7 +8,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT openmedia_ipo_supported OUTPUT openmedia_ipo_error)
-if(openmedia_ipo_supported)
+if(openmedia_ipo_supported AND NOT MSVC)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
@@ -177,12 +177,15 @@ add_library(OpenMediaCore SHARED
 target_include_directories(OpenMediaCore PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+if(WIN32)
+    set_target_properties(OpenMediaCore PROPERTIES
+        WINDOWS_EXPORT_ALL_SYMBOLS ON
+        INTERPROCEDURAL_OPTIMIZATION FALSE
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE
+    )
+endif()
 openmedia_apply_warnings(OpenMediaCore)
 openmedia_apply_simd_and_security(OpenMediaCore)
-
-if(WIN32)
-    set_target_properties(OpenMediaCore PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
-endif()
 
 openmedia_resolve_ffmpeg(OPENMEDIA_FFMPEG_FOUND OPENMEDIA_FFMPEG_LIBS OPENMEDIA_FFMPEG_INCS)
 if(OPENMEDIA_FFMPEG_FOUND)
@@ -374,6 +377,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/Config.toml")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES.md" DESTINATION .)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md" DESTINATION .)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/cpack/MultiCPackConfig.cmake")

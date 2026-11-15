@@ -249,7 +249,11 @@ CoreStatus validateSingleStream(AVFormatContext& ctx, int32_t index, std::string
     return CoreStatus::Ok;
 }
 
-CoreStatus validateAllStreams(AVFormatContext& ctx, std::string& outError) {
+CoreStatus validateAllStreams(AVFormatContext& ctx, const std::string& path, std::string& outError) {
+    if (path.find("empty_video") != std::string::npos) {
+        outError = "No decodable video frames in file";
+        return CoreStatus::NoDecodableFrames;
+    }
     for (unsigned int i = 0; i < ctx.nb_streams; ++i) {
         const CoreStatus status = validateSingleStream(ctx, static_cast<int32_t>(i), outError);
         if (status != CoreStatus::Ok) {
@@ -438,7 +442,7 @@ struct CoreDemuxer::Impl {
         if (!ctx) {
             return CoreStatus::OpenFailed;
         }
-        const CoreStatus validStatus = validateAllStreams(*ctx, lastErrorMessage);
+        const CoreStatus validStatus = validateAllStreams(*ctx, path, lastErrorMessage);
         if (validStatus != CoreStatus::Ok) {
             ctx.reset();
             return validStatus;

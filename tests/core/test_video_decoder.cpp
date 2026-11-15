@@ -2,6 +2,7 @@
 /// @brief Standalone unit tests (TC-1.2.2) for CoreVideoDecoder.
 
 #include "openmedia/video_decoder.hpp"
+#include "openmedia/video_encoder.hpp"
 
 #include <array>
 #include <cstdint>
@@ -218,41 +219,122 @@ openmedia::StreamInfo makeVideoStream(openmedia::CodecId codec) {
     openmedia::StreamInfo stream;
     stream.type = openmedia::MediaType::Video;
     stream.codec = codec;
-    stream.width = 1280;
-    stream.height = 720;
+    stream.width = 64;
+    stream.height = 64;
     stream.bitDepth = 8;
     return stream;
 }
 
-openmedia::EncodedPacket makePacket(int64_t pts, uint8_t marker, bool keyframe) {
-    openmedia::EncodedPacket pkt;
-    pkt.pts = pts;
-    pkt.dts = pts;
-    pkt.duration = 33;
-    pkt.isKeyFrame = keyframe;
-    pkt.data = {marker, 0x11, 0x22, 0x33};
-    return pkt;
+openmedia::RawVideoFrame makeRawFrame8Bit(int32_t width, int32_t height, int64_t pts, uint8_t luma) {
+    openmedia::RawVideoFrame frame;
+    frame.width = width;
+    frame.height = height;
+    frame.bitDepth = 8;
+    frame.format = openmedia::PixelFormat::YUV420P;
+    frame.pts = pts;
+    frame.duration = 33;
+    frame.isKeyFrame = true;
+    const uint32_t yStride = openmedia::RawVideoFrame::alignRowStride16(static_cast<uint32_t>(width));
+    const uint32_t uvStride = openmedia::RawVideoFrame::alignRowStride16(static_cast<uint32_t>(width / 2));
+    frame.rowBytes[0] = yStride;
+    frame.rowBytes[1] = uvStride;
+    frame.rowBytes[2] = uvStride;
+    frame.planes[0].assign(static_cast<size_t>(yStride) * height, luma);
+    frame.planes[1].assign(static_cast<size_t>(uvStride) * (height / 2), 0x80U);
+    frame.planes[2].assign(static_cast<size_t>(uvStride) * (height / 2), 0x80U);
+    return frame;
+}
+
+std::vector<openmedia::EncodedPacket> encodeRealPackets(
+    openmedia::CodecId codec,
+    const std::vector<int64_t>& ptsValues,
+    std::vector<uint8_t>& outExtradata) {
+    openmedia::CoreVideoEncoder encoder;
+    openmedia::VideoEncodeConfig cfg;
+    cfg.codec = codec;
+    cfg.width = 64;
+    cfg.height = 64;
+    cfg.pixelFormat = openmedia::PixelFormat::YUV420P;
+    cfg.bitDepth = 8;
+    cfg.frameRate = openmedia::RationalTime{30, 1};
+    cfg.timeBase = openmedia::RationalTime{1, 1000};
+    cfg.crf = 30;
+    cfg.preset = (codec == openmedia::CodecId::VP9) ? 6 : 10;
+    cfg.gopSize = 1;
+
+    std::vector<openmedia::EncodedPacket> packets;
+    if (encoder.initialize(cfg) != openmedia::CoreStatus::Ok) {
+        return packets;
+    }
+    for (size_t i = 0; i < ptsValues.size(); ++i) {
+        auto frame = makeRawFrame8Bit(64, 64, static_cast<int64_t>(i), static_cast<uint8_t>(0x20U + i * 16U));
+        encoder.encodeFrame(frame, packets);
+    }
+    encoder.flush(packets);
+    outExtradata = encoder.getExtradata();
+    for (size_t i = 0; i < packets.size() && i < ptsValues.size(); ++i) {
+        packets[i].pts = ptsValues[i];
+        packets[i].dts = ptsValues[i];
+        packets[i].duration = 33;
+        packets[i].isKeyFrame = true;
+    }
+    return packets;
+}
+
+void feedAndDrainAllFrames(openmedia::CoreVideoDecoder& decoder,
+                           const std::vector<openmedia::EncodedPacket>& pkts,
+                           std::vector<int64_t>& outPts) {
+    outPts.clear();
+    openmedia::RawVideoFrame frame;
+    for (const auto& pkt : pkts) {
+        decoder.sendPacket(pkt);
+        while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
+            outPts.push_back(frame.pts);
+        }
+    }
+    decoder.flush();
+    while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
+        outPts.push_back(frame.pts);
+    }
 }
 
 /// @brief Verifies final frame in WebM/MKV (VP9/AV1) is always emitted before EndOfFile.
 void testWebmFinalFrameEofDrain() {
+    std::vector<uint8_t> extradata;
+    const auto pkts = encodeRealPackets(openmedia::CodecId::VP9, {0, 33, 66}, extradata);
+    check(pkts.size() == 3U, "TC-1.2.2 EOF Drain", "Generated 3 real VP9 packets");
+    if (pkts.size() != 3U) {
+        return;
+    }
+
+    openmedia::StreamInfo stream = makeVideoStream(openmedia::CodecId::VP9);
+    stream.extradata = extradata;
+
     openmedia::CoreVideoDecoder decoder;
-    if (decoder.initialize(makeVideoStream(openmedia::CodecId::VP9)) != openmedia::CoreStatus::Ok) {
+    if (decoder.initialize(stream) != openmedia::CoreStatus::Ok) {
         check(false, "TC-1.2.2 EOF Drain", "Failed to initialize VP9 decoder");
         return;
     }
 
-    check(decoder.sendPacket(makePacket(0, 0xA1, true)) == openmedia::CoreStatus::Ok,
-          "TC-1.2.2 EOF Drain", "Submitted frame 0");
-    check(decoder.sendPacket(makePacket(33, 0xA2, false)) == openmedia::CoreStatus::Ok,
-          "TC-1.2.2 EOF Drain", "Submitted frame 1");
-    check(decoder.sendPacket(makePacket(66, 0xA3, false)) == openmedia::CoreStatus::Ok,
-          "TC-1.2.2 EOF Drain", "Submitted final frame 2");
-    check(decoder.flush() == openmedia::CoreStatus::Ok,
-          "TC-1.2.2 EOF Drain", "flush() succeeded");
-
     std::vector<int64_t> decodedPts;
     openmedia::RawVideoFrame frame;
+    check(decoder.sendPacket(pkts[0]) == openmedia::CoreStatus::Ok,
+          "TC-1.2.2 EOF Drain", "Submitted frame 0");
+    while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
+        decodedPts.push_back(frame.pts);
+    }
+    check(decoder.sendPacket(pkts[1]) == openmedia::CoreStatus::Ok,
+          "TC-1.2.2 EOF Drain", "Submitted frame 1");
+    while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
+        decodedPts.push_back(frame.pts);
+    }
+    check(decoder.sendPacket(pkts[2]) == openmedia::CoreStatus::Ok,
+          "TC-1.2.2 EOF Drain", "Submitted final frame 2");
+    while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
+        decodedPts.push_back(frame.pts);
+    }
+    check(decoder.flush() == openmedia::CoreStatus::Ok,
+          "TC-1.2.2 EOF Drain", "flush() succeeded");
     while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
         decodedPts.push_back(frame.pts);
     }
@@ -268,22 +350,23 @@ void testWebmFinalFrameEofDrain() {
 
 /// @brief Verifies non-zero start timestamps normalize so frame 0 maps to PTS = 0 without dropping.
 void testZeroPtsNormalization() {
+    std::vector<uint8_t> extradata;
+    auto pkts = encodeRealPackets(openmedia::CodecId::AV1, {1234, 1267, 1300}, extradata);
+    if (pkts.size() < 3U) {
+        return;
+    }
+
+    openmedia::StreamInfo stream = makeVideoStream(openmedia::CodecId::AV1);
+    stream.extradata = extradata;
+
     openmedia::CoreVideoDecoder decoder;
-    if (decoder.initialize(makeVideoStream(openmedia::CodecId::AV1)) != openmedia::CoreStatus::Ok) {
+    if (decoder.initialize(stream) != openmedia::CoreStatus::Ok) {
         check(false, "TC-1.2.2 PTS Norm", "Failed to initialize AV1 decoder");
         return;
     }
 
-    decoder.sendPacket(makePacket(1234, 0xB1, true));
-    decoder.sendPacket(makePacket(1267, 0xB2, false));
-    decoder.sendPacket(makePacket(1300, 0xB3, false));
-    decoder.flush();
-
     std::vector<int64_t> ptsList;
-    openmedia::RawVideoFrame frame;
-    while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
-        ptsList.push_back(frame.pts);
-    }
+    feedAndDrainAllFrames(decoder, pkts, ptsList);
 
     const bool autoNormOk = ptsList.size() == 3U &&
                             ptsList[0] == 0 &&
@@ -293,14 +376,13 @@ void testZeroPtsNormalization() {
 
     decoder.reset();
     decoder.resetFirstTimestamp(5000);
-    decoder.sendPacket(makePacket(5000, 0xC1, true));
-    decoder.sendPacket(makePacket(5033, 0xC2, false));
-    decoder.flush();
+    std::vector<openmedia::EncodedPacket> twoPkts = {pkts[0], pkts[1]};
+    twoPkts[0].pts = 5000;
+    twoPkts[0].dts = 5000;
+    twoPkts[1].pts = 5033;
+    twoPkts[1].dts = 5033;
 
-    ptsList.clear();
-    while (decoder.decodeNextFrame(frame) == openmedia::CoreStatus::Ok) {
-        ptsList.push_back(frame.pts);
-    }
+    feedAndDrainAllFrames(decoder, twoPkts, ptsList);
 
     const bool explicitNormOk = ptsList.size() == 2U && ptsList[0] == 0 && ptsList[1] == 33;
     check(explicitNormOk, "TC-1.2.2 PTS Norm", "Explicit resetFirstTimestamp(5000) maps frame 0 to 0");
@@ -328,15 +410,21 @@ void testNoDecodableFramesGuard() {
           "TC-1.2.2 Zero-Frame", "reset() clears diagnostic message");
 }
 
-void verifySingleHwFallback(openmedia::HwDecodeBackend backend, const char* label) {
+void verifySingleHwFallback(openmedia::HwDecodeBackend backend,
+                            const char* label,
+                            const std::vector<openmedia::EncodedPacket>& pkts,
+                            const std::vector<uint8_t>& extradata) {
+    openmedia::StreamInfo stream = makeVideoStream(openmedia::CodecId::AV1);
+    stream.extradata = extradata;
+
     openmedia::CoreVideoDecoder decoder;
-    const auto initStatus = decoder.initializeWithHardware(makeVideoStream(openmedia::CodecId::AV1), backend);
+    const auto initStatus = decoder.initializeWithHardware(stream, backend);
     check(initStatus == openmedia::CoreStatus::Ok, label, "initializeWithHardware succeeded");
     check(decoder.isHardwareActive() && decoder.activeBackend() == backend,
           label, "Hardware backend reported active before fallback");
 
-    decoder.sendPacket(makePacket(1000, 0xD1, true));
-    decoder.sendPacket(makePacket(1033, 0xD2, false));
+    decoder.sendPacket(pkts[0]);
+    decoder.sendPacket(pkts[1]);
 
     std::vector<openmedia::RawVideoFrame> drained;
     const auto fallbackStatus = decoder.drainBeforeFallback(drained);
@@ -346,7 +434,7 @@ void verifySingleHwFallback(openmedia::HwDecodeBackend backend, const char* labe
     check(drained.size() == 2U && drained[0].pts == 0 && drained[1].pts == 33,
           label, "Drained buffered frames with normalized PTS before CPU fallback");
 
-    decoder.sendPacket(makePacket(1066, 0xD3, false));
+    decoder.sendPacket(pkts[2]);
     decoder.flush();
     openmedia::RawVideoFrame cpuFrame;
     check(decoder.decodeNextFrame(cpuFrame) == openmedia::CoreStatus::Ok && cpuFrame.pts == 66,
@@ -357,6 +445,13 @@ void verifySingleHwFallback(openmedia::HwDecodeBackend backend, const char* labe
 
 /// @brief Verifies drainBeforeFallback() across NVDEC, D3D11VA, and VideoToolbox.
 void testHardwareDrainBeforeFallback() {
+    std::vector<uint8_t> extradata;
+    const auto pkts = encodeRealPackets(openmedia::CodecId::AV1, {1000, 1033, 1066}, extradata);
+    if (pkts.size() < 3U) {
+        check(false, "TC-1.2.2 HW Fallback", "Failed to generate real AV1 test packets");
+        return;
+    }
+
     struct HwCase {
         openmedia::HwDecodeBackend backend;
         const char* label;
@@ -368,7 +463,7 @@ void testHardwareDrainBeforeFallback() {
     }};
 
     for (const auto& c : cases) {
-        verifySingleHwFallback(c.backend, c.label);
+        verifySingleHwFallback(c.backend, c.label, pkts, extradata);
     }
 }
 

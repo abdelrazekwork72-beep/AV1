@@ -12,7 +12,7 @@
   <choice id="com.openmedia.premiere.mediacore" visible="false">
     <pkg-ref id="com.openmedia.premiere.pkg" />
   </choice>
-  <pkg-ref id="com.openmedia.premiere.pkg" version="1.0.0" installKBytes="0">
+  <pkg-ref id="com.openmedia.premiere.pkg" version="2.0.0" installKBytes="0">
     #OpenMediaPremierePlugin.pkg
   </pkg-ref>
 </installer-gui-script>

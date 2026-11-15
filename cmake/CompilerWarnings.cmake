@@ -1,4 +1,4 @@
-# Compiler warning, SIMD, and security configuration for OpenMedia targets.
+# Compiler warning, SIMD, LTCG hardening, and security configuration for OpenMedia targets.
 
 include_guard(GLOBAL)
 include(CheckCXXCompilerFlag)
@@ -12,6 +12,28 @@ function(openmedia_apply_warnings target_name)
         target_compile_options("${target_name}" PRIVATE /W4 /permissive-)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         target_compile_options("${target_name}" PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endfunction()
+
+function(openmedia_apply_release_hardening target_name)
+    if(NOT TARGET "${target_name}")
+        message(FATAL_ERROR "openmedia_apply_release_hardening: '${target_name}' is not a valid CMake target.")
+    endif()
+
+    get_target_property(target_type "${target_name}" TYPE)
+    get_target_property(export_all_syms "${target_name}" WINDOWS_EXPORT_ALL_SYMBOLS)
+
+    if(MSVC)
+        target_compile_options("${target_name}" PRIVATE $<$<CONFIG:Release>:/O2>)
+        if(export_all_syms)
+            set_target_properties("${target_name}" PROPERTIES
+                INTERPROCEDURAL_OPTIMIZATION FALSE
+                INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE
+            )
+        elseif(NOT target_type STREQUAL "OBJECT_LIBRARY")
+            target_compile_options("${target_name}" PRIVATE $<$<CONFIG:Release>:/GL>)
+            target_link_options("${target_name}" PRIVATE $<$<CONFIG:Release>:/LTCG>)
+        endif()
     endif()
 endfunction()
 
@@ -43,4 +65,6 @@ function(openmedia_apply_simd_and_security target_name)
             target_link_options("${target_name}" PRIVATE -Wl,--dynamicbase -Wl,--nxcompat -Wl,--high-entropy-va)
         endif()
     endif()
+
+    openmedia_apply_release_hardening("${target_name}")
 endfunction()

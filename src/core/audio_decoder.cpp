@@ -40,7 +40,7 @@ bool isValidPacketPayload(const std::vector<uint8_t>& data) noexcept {
            data.size() <= static_cast<size_t>(std::numeric_limits<int>::max());
 }
 
-size_t bytesPerPcmSample(int32_t bitDepth) noexcept {
+[[maybe_unused]] size_t bytesPerPcmSample(int32_t bitDepth) noexcept {
     if (bitDepth == 24) {
         return 3;
     }

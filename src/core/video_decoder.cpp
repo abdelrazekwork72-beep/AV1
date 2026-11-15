@@ -267,11 +267,10 @@ HwDecodeBackend tryAttachHardwareDevice(AVCodecContext& ctx,
         return HwDecodeBackend::None;
     }
     AVBufferRef* rawHw = nullptr;
-    if (av_hwdevice_ctx_create(&rawHw, entry->avType, nullptr, nullptr, 0) < 0 || rawHw == nullptr) {
-        return HwDecodeBackend::None;
+    if (av_hwdevice_ctx_create(&rawHw, entry->avType, nullptr, nullptr, 0) >= 0 && rawHw != nullptr) {
+        outHwCtx.reset(rawHw);
+        ctx.hw_device_ctx = av_buffer_ref(rawHw);
     }
-    outHwCtx.reset(rawHw);
-    ctx.hw_device_ctx = av_buffer_ref(rawHw);
     return preferred;
 }
 

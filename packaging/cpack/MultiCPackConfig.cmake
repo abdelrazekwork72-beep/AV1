@@ -10,7 +10,7 @@ elseif(APPLE)
 else()
     set(CPACK_GENERATOR "TGZ")
     set(CPACK_PACKAGE_NAME "OpenMediaPremierePlugin")
-    set(CPACK_PACKAGE_VERSION "1.0.0")
+    set(CPACK_PACKAGE_VERSION "2.0.0")
 endif()
 
 set(CPACK_RESOURCE_FILE_LICENSE "${OPENMEDIA_PACKAGING_ROOT}/../../THIRD_PARTY_LICENSES.md")

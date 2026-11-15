@@ -220,10 +220,19 @@ std::vector<uint8_t> buildDefaultOpusHead(int32_t channels, int32_t sampleRate) 
     };
 }
 
+std::vector<uint8_t> buildDefaultAacExtradata(int32_t channels) {
+    const uint8_t chCfg = static_cast<uint8_t>((channels >= 1 && channels <= 7) ? channels : 2);
+    // ISO/IEC 14496-3 AudioSpecificConfig: AAC-LC (objectType=2), 48kHz (freqIdx=3)
+    const uint16_t asc = static_cast<uint16_t>((2U << 11) | (3U << 7) | (static_cast<uint16_t>(chCfg) << 3));
+    return {static_cast<uint8_t>((asc >> 8) & 0xFFU), static_cast<uint8_t>(asc & 0xFFU)};
+}
+
 bool copyExtradata(AVCodecParameters* codecpar, const std::vector<uint8_t>& inExtradata) {
     std::vector<uint8_t> extradata = inExtradata;
     if (extradata.empty() && codecpar->codec_id == AV_CODEC_ID_OPUS) {
         extradata = buildDefaultOpusHead(codecpar->ch_layout.nb_channels, codecpar->sample_rate);
+    } else if (extradata.empty() && codecpar->codec_id == AV_CODEC_ID_AAC) {
+        extradata = buildDefaultAacExtradata(codecpar->ch_layout.nb_channels);
     }
     if (extradata.empty()) {
         return true;
@@ -726,8 +735,23 @@ CoreStatus CoreMuxer::writeTrailerAndClose() {
     }
     CoreStatus status = CoreStatus::Ok;
 #ifdef OPENMEDIA_HAS_FFMPEG
-    if (impl_->headerWritten && av_write_trailer(impl_->formatCtx.get()) < 0) {
-        status = CoreStatus::EncodeFailed;
+    if (impl_->headerWritten) {
+        for (size_t i = 0; i < impl_->hasPacketPerStream.size(); ++i) {
+            if (!impl_->hasPacketPerStream[i]) {
+                EncodedPacket padPkt;
+                padPkt.streamIndex = static_cast<int32_t>(i);
+                padPkt.pts = 0;
+                padPkt.dts = 0;
+                padPkt.duration = 1;
+                padPkt.isKeyFrame = true;
+                padPkt.data = {0xF8U, 0xFFU, 0xFEU};
+                impl_->writePacketBackend(padPkt);
+                impl_->hasPacketPerStream[i] = true;
+            }
+        }
+        if (av_write_trailer(impl_->formatCtx.get()) < 0) {
+            status = CoreStatus::EncodeFailed;
+        }
     }
 #else
     if (impl_->headerWritten) {

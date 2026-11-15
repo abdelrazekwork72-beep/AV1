@@ -61,6 +61,17 @@ RawVideoFrame makeSyntheticFrameForFormat(PixelFormat fmt, int32_t width, int32_
         frame.planes[1].assign(static_cast<size_t>(stride) * (height / 2), 0x80);
         return frame;
     }
+    if (fmt == PixelFormat::YUV444P10LE) {
+        frame.bitDepth = 10;
+        const uint32_t stride = RawVideoFrame::alignRowStride16(static_cast<uint32_t>(width) * 2U);
+        frame.rowBytes[0] = stride;
+        frame.rowBytes[1] = stride;
+        frame.rowBytes[2] = stride;
+        frame.planes[0].assign(static_cast<size_t>(stride) * height, 0x10);
+        frame.planes[1].assign(static_cast<size_t>(stride) * height, 0x02);
+        frame.planes[2].assign(static_cast<size_t>(stride) * height, 0x02);
+        return frame;
+    }
     if (fmt == PixelFormat::YUV444P) {
         frame.bitDepth = 8;
         const uint32_t stride = RawVideoFrame::alignRowStride16(static_cast<uint32_t>(width));
@@ -226,23 +237,26 @@ void testEncodeAndFlushGop() {
 }
 
 void testVp9HardwareFallbackAndPixelFormats() {
-    // Hardware preference must safely fall back to CPU when no NVENC hardware is available.
+    // Hardware preference must safely fall back to CPU (libsvtav1/libaom-av1) when no NVENC hardware is available.
     CoreVideoEncoder av1HwFallback;
     VideoEncodeConfig hwCfg;
     hwCfg.codec = CodecId::AV1;
     hwCfg.width = 64;
     hwCfg.height = 64;
-    hwCfg.pixelFormat = PixelFormat::NV12;
+    hwCfg.pixelFormat = PixelFormat::YUV420P;
     hwCfg.bitDepth = 8;
     hwCfg.preferHardware = true;
     hwCfg.bitrateBps = 500000;
     assert(av1HwFallback.initialize(hwCfg) == CoreStatus::Ok);
     std::vector<EncodedPacket> hwPackets;
-    assert(av1HwFallback.encodeFrame(makeSyntheticFrameForFormat(PixelFormat::NV12, 64, 64, 0), hwPackets) == CoreStatus::Ok);
+    RawVideoFrame keyFrame = makeSyntheticFrameForFormat(PixelFormat::YUV420P, 64, 64, 0);
+    keyFrame.isKeyFrame = true;
+    assert(av1HwFallback.encodeFrame(keyFrame, hwPackets) == CoreStatus::Ok);
     assert(av1HwFallback.flush(hwPackets) == CoreStatus::Ok);
     assert(hwPackets.size() == 1U);
+    assert(hwPackets.front().isKeyFrame);
 
-    // VP9 with explicit bitrate and 8-bit YUV420P / YUV444P / BGRA8 paths.
+    // VP9 with explicit bitrate and 8-bit YUV420P / YUV444P / 10-bit YUV444P10LE paths.
     CoreVideoEncoder vp9Encoder;
     VideoEncodeConfig vp9Cfg;
     vp9Cfg.codec = CodecId::VP9;
@@ -258,7 +272,7 @@ void testVp9HardwareFallbackAndPixelFormats() {
     assert(vp9Encoder.flush(vp9Packets) == CoreStatus::Ok);
     assert(vp9Packets.size() == 1U);
 
-    // Planar 4:4:4 and packed BGRA8 validation.
+    // Planar 4:4:4 and 10-bit 4:4:4 validation.
     vp9Cfg.pixelFormat = PixelFormat::YUV444P;
     assert(vp9Encoder.initialize(vp9Cfg) == CoreStatus::Ok);
     vp9Packets.clear();
@@ -266,12 +280,16 @@ void testVp9HardwareFallbackAndPixelFormats() {
     assert(vp9Encoder.flush(vp9Packets) == CoreStatus::Ok);
     assert(vp9Packets.size() == 1U);
 
-    vp9Cfg.pixelFormat = PixelFormat::BGRA8;
+    vp9Cfg.pixelFormat = PixelFormat::YUV444P10LE;
+    vp9Cfg.bitDepth = 10;
     assert(vp9Encoder.initialize(vp9Cfg) == CoreStatus::Ok);
     vp9Packets.clear();
-    assert(vp9Encoder.encodeFrame(makeSyntheticFrameForFormat(PixelFormat::BGRA8, 64, 64, 0), vp9Packets) == CoreStatus::Ok);
+    RawVideoFrame yuv444p10Frame = makeSyntheticFrameForFormat(PixelFormat::YUV444P10LE, 64, 64, 0);
+    yuv444p10Frame.isKeyFrame = true;
+    assert(vp9Encoder.encodeFrame(yuv444p10Frame, vp9Packets) == CoreStatus::Ok);
     assert(vp9Encoder.flush(vp9Packets) == CoreStatus::Ok);
     assert(vp9Packets.size() == 1U);
+    assert(vp9Packets.front().isKeyFrame);
 }
 
 } // namespace

@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release version tag to publish (e.g. v1.0.0)'
+        description: 'Release version tag to publish (e.g. v2.0.0)'
         required: false
-        default: 'v1.0.0'
+        default: 'v2.0.0'
 
 permissions:
   contents: write
@@ -29,13 +29,8 @@ jobs:
         include:
           - os: windows-latest
             platform_name: Windows-x64
-            archive_name: OpenMedia-PremierePlugin-v1.0.0-Windows-x64.zip
-          - os: macos-latest
-            platform_name: macOS-Universal
-            archive_name: OpenMedia-PremierePlugin-v1.0.0-macOS.zip
-          - os: ubuntu-latest
-            platform_name: Linux-x64
-            archive_name: OpenMedia-PremierePlugin-v1.0.0-Linux-x64.tar.gz
+            installer_name: OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Setup.exe
+            portable_name: OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Portable.zip
 
     steps:
       - name: Checkout Repository
@@ -49,34 +44,22 @@ jobs:
       - name: Run Clean-Room License & GPL Contamination Audit
         run: python packaging/scripts/audit_licenses.py
 
-      - name: Install FFmpeg Development Libraries (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq pkg-config libavcodec-dev libavformat-dev libswscale-dev libswresample-dev libavutil-dev
-
-      - name: Install FFmpeg Development Libraries (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install pkg-config ffmpeg
-
       - name: Configure CMake (Release)
         run: >
           cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
           -DADOBE_PP_SDK="${{ github.workspace }}/tests/mocks/mock_sdk"
 
-      - name: Build OpenMediaCore, Dual-PRM Importers (.prm/.bundle), Exporter (.prm/.bundle) & Test Suite
+      - name: Build OpenMediaCore, Dual-PRM Importers (.prm), Exporter (.prm) & Test Suite
         run: cmake --build build --config Release --parallel
 
-      - name: Run Full CTest Suite (Unit, Integration, Benchmarks & Packaging)
+      - name: Run Full CTest Suite (52/52 Unit, Integration, Benchmarks & Packaging)
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Package Windows MediaCore Plugin Bundle (Dual-PRM + Config.toml + VC++ Check)
-        if: runner.os == 'Windows'
+      - name: Build Standalone Windows .exe Installer (NSIS) & Portable ZIP
         shell: pwsh
         run: |
-          $stageDir = "dist/OpenMedia-PremierePlugin-Windows-x64"
+          $stageDir = Join-Path $env:GITHUB_WORKSPACE "dist/OpenMedia-PremierePlugin-Windows-x64"
           New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
           Copy-Item "build/bin/OpenMedia_Importer.prm" -Destination $stageDir -Force
@@ -87,92 +70,34 @@ jobs:
           Copy-Item "THIRD_PARTY_LICENSES.md" -Destination $stageDir -Force
           Copy-Item "README.md" -Destination $stageDir -Force
 
-          $installScript = @'
-          # Requires -RunAsAdministrator
-          $ErrorActionPreference = "Stop"
+          Compress-Archive -Path "$stageDir/*" -DestinationPath "${{ matrix.portable_name }}" -Force
 
-          $System32 = Join-Path $env:SystemRoot "System32"
-          $VcRuntime = Join-Path $System32 "VCRUNTIME140.dll"
-          $VcRuntime1 = Join-Path $System32 "VCRUNTIME140_1.dll"
-          if (-not (Test-Path $VcRuntime) -or -not (Test-Path $VcRuntime1)) {
-              Write-Error "Missing Microsoft Visual C++ 2015-2022 Redistributable (x64): VCRUNTIME140.dll or VCRUNTIME140_1.dll not found in $System32. Please download and install vc_redist.x64.exe from https://aka.ms/vs/17/release/vc_redist.x64.exe before installing OpenMedia plugins."
-              exit 1
+          $makensis = "makensis"
+          if (-not (Get-Command $makensis -ErrorAction SilentlyContinue)) {
+              $nsiCandidate = "C:\Program Files (x86)\NSIS\makensis.exe"
+              if (Test-Path $nsiCandidate) {
+                  $makensis = $nsiCandidate
+              } else {
+                  choco install nsis -y --no-progress
+                  $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+              }
           }
 
-          $TargetDir = "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore"
-          if (-not (Test-Path $TargetDir)) {
-              New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
+          $outInstaller = Join-Path $env:GITHUB_WORKSPACE "${{ matrix.installer_name }}"
+          & $makensis "/DSTAGE_DIR=$stageDir" "/DOUTFILE=$outInstaller" "packaging/cpack/windows/openmedia_installer.nsi"
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $outInstaller)) {
+              throw "NSIS installer generation failed"
           }
-          Copy-Item "$PSScriptRoot\OpenMedia_Importer.prm" -Destination $TargetDir -Force
-          Copy-Item "$PSScriptRoot\OpenMedia_ImporterHP.prm" -Destination $TargetDir -Force
-          Copy-Item "$PSScriptRoot\OpenMedia_Exporter.prm" -Destination $TargetDir -Force
-          Copy-Item "$PSScriptRoot\OpenMediaCore.dll" -Destination $TargetDir -Force
-          Copy-Item "$PSScriptRoot\Config.toml" -Destination $TargetDir -Force
-          Copy-Item "$PSScriptRoot\THIRD_PARTY_LICENSES.md" -Destination $TargetDir -Force
-          Write-Host "[OpenMedia] Installed Dual-PRM Importers (OpenMedia_Importer.prm, OpenMedia_ImporterHP.prm), OpenMedia_Exporter.prm, OpenMediaCore.dll, and Config.toml to $TargetDir" -ForegroundColor Green
-          '@
-          Set-Content -Path "$stageDir/Install-MediaCore.ps1" -Value $installScript -Encoding UTF8
 
-          Compress-Archive -Path "$stageDir/*" -DestinationPath "${{ matrix.archive_name }}" -Force
-          Get-ChildItem "${{ matrix.archive_name }}"
-
-      - name: Package macOS MediaCore Plugin Bundle (Dual-PRM + Config.toml + Installer Script)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          STAGE_DIR="dist/OpenMedia-PremierePlugin-macOS"
-          mkdir -p "$STAGE_DIR"
-
-          cp -R build/bin/OpenMedia_Importer.bundle "$STAGE_DIR/"
-          cp -R build/bin/OpenMedia_ImporterHP.bundle "$STAGE_DIR/"
-          cp -R build/bin/OpenMedia_Exporter.bundle "$STAGE_DIR/"
-          cp build/bin/libOpenMediaCore.dylib "$STAGE_DIR/"
-          cp packaging/Config.toml "$STAGE_DIR/"
-          cp THIRD_PARTY_LICENSES.md "$STAGE_DIR/"
-          cp README.md "$STAGE_DIR/"
-
-          cat << 'EOF' > "$STAGE_DIR/install-mediacore.sh"
-          #!/usr/bin/env bash
-          set -euo pipefail
-          TARGET_DIR="/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore"
-          sudo mkdir -p "$TARGET_DIR"
-          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-          sudo cp -R "$SCRIPT_DIR/OpenMedia_Importer.bundle" "$TARGET_DIR/"
-          sudo cp -R "$SCRIPT_DIR/OpenMedia_ImporterHP.bundle" "$TARGET_DIR/"
-          sudo cp -R "$SCRIPT_DIR/OpenMedia_Exporter.bundle" "$TARGET_DIR/"
-          sudo cp "$SCRIPT_DIR/libOpenMediaCore.dylib" "$TARGET_DIR/"
-          sudo cp "$SCRIPT_DIR/Config.toml" "$TARGET_DIR/"
-          sudo cp "$SCRIPT_DIR/THIRD_PARTY_LICENSES.md" "$TARGET_DIR/"
-          sudo chmod -R 755 "$TARGET_DIR/OpenMedia_Importer.bundle" "$TARGET_DIR/OpenMedia_ImporterHP.bundle" "$TARGET_DIR/OpenMedia_Exporter.bundle"
-          echo "[OpenMedia] Installed Dual-PRM bundles, OpenMedia_Exporter.bundle, libOpenMediaCore.dylib, and Config.toml to $TargetDir"
-          EOF
-          chmod +x "$STAGE_DIR/install-mediacore.sh"
-
-          (cd "$STAGE_DIR" && zip -r "${GITHUB_WORKSPACE}/${{ matrix.archive_name }}" .)
-          ls -lh "${{ matrix.archive_name }}"
-
-      - name: Package Linux MediaCore Shared Libraries (.so + Config.toml + CPack TGZ)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          STAGE_DIR="dist/OpenMedia-PremierePlugin-Linux-x64"
-          mkdir -p "$STAGE_DIR"
-
-          cp build/bin/libOpenMediaCore.so* "$STAGE_DIR/" 2>/dev/null || true
-          cp build/bin/*OpenMedia_Importer* "$STAGE_DIR/" 2>/dev/null || true
-          cp build/bin/*OpenMedia_Exporter* "$STAGE_DIR/" 2>/dev/null || true
-          cp packaging/Config.toml "$STAGE_DIR/"
-          cp THIRD_PARTY_LICENSES.md "$STAGE_DIR/"
-          cp README.md "$STAGE_DIR/"
-
-          tar -czf "${{ matrix.archive_name }}" -C "$STAGE_DIR" .
-          ls -lh "${{ matrix.archive_name }}"
+          Get-ChildItem "${{ matrix.installer_name }}", "${{ matrix.portable_name }}"
 
       - name: Upload Release Package Artifact (${{ matrix.platform_name }})
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform_name }}-Release-Package
-          path: ${{ matrix.archive_name }}
+          path: |
+            ${{ matrix.installer_name }}
+            ${{ matrix.portable_name }}
           if-no-files-found: error
           retention-days: 90
 
@@ -202,39 +127,35 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "tag_name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag_name=v1.0.0" >> "$GITHUB_OUTPUT"
+            echo "tag_name=v2.0.0" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag_name }}
-          name: "OpenMedia Premiere Pro & Media Encoder Plugin ${{ steps.tag.outputs.tag_name }}"
+          name: "OpenMedia Premiere Pro & Media Encoder Plugin ${{ steps.tag.outputs.tag_name }} — Windows x64"
           prerelease: false
           generate_release_notes: true
           files: |
-            release-assets/OpenMedia-PremierePlugin-v1.0.0-Windows-x64.zip
-            release-assets/OpenMedia-PremierePlugin-v1.0.0-macOS.zip
-            release-assets/OpenMedia-PremierePlugin-v1.0.0-Linux-x64.tar.gz
+            release-assets/OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Setup.exe
+            release-assets/OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Portable.zip
             release-assets/SHA256SUMS.txt
           body: |
-            ## OpenMedia Premiere Pro & Adobe Media Encoder Plugin (`${{ steps.tag.outputs.tag_name }}`)
-            Native **MKV / WebM / Ogg** Dual-PRM Importer (`VP9`, `AV1`, `Opus`, `Vorbis`, `FLAC`) and **AV1 / VP9** Exporter (`SVT-AV1`, `libaom-av1`, `libvpx-vp9`, `NVENC`, `AMF`, `QSV`) for Adobe Premiere Pro & Adobe Media Encoder.
+            ## OpenMedia Premiere Pro & Adobe Media Encoder Plugin (`${{ steps.tag.outputs.tag_name }}` — Windows x64)
+            Native **MKV / WebM / Ogg** Dual-PRM Importer (`VP9`, `AV1`, `Opus`, `Vorbis`, `FLAC`, `xHE-AAC`, `PCM`) and **AV1 / VP9** Exporter (`SVT-AV1`, `libaom-av1`, `libvpx-vp9`, `NVENC`, `AMF`, `QSV`) for Adobe Premiere Pro & Adobe Media Encoder on Windows x64.
 
-            ### Included Binaries
-            - **Windows x64 (`OpenMedia-PremierePlugin-v1.0.0-Windows-x64.zip`)**:
-              - `OpenMedia_Importer.prm` (Normal priority `0x00`, `xImportEntry`)
-              - `OpenMedia_ImporterHP.prm` (High priority `0x01`, `xImportEntry`)
-              - `OpenMedia_Exporter.prm` (`xSDKExport`)
-              - `OpenMediaCore.dll`
-              - `Config.toml` (Dual-PRM & CPU/GPU decode policy configuration)
-              - `Install-MediaCore.ps1` (One-click installer with VC++ Redistributable check to `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`)
-              - `THIRD_PARTY_LICENSES.md`
-            - **macOS (`OpenMedia-PremierePlugin-v1.0.0-macOS.zip`)**:
-              - `OpenMedia_Importer.bundle`
-              - `OpenMedia_ImporterHP.bundle`
-              - `OpenMedia_Exporter.bundle`
-              - `libOpenMediaCore.dylib`
-              - `Config.toml`
-              - `install-mediacore.sh` (Installer script to `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore`)
-              - `THIRD_PARTY_LICENSES.md`
+            ### Included Release Assets
+            - **`OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Setup.exe`** (Standalone Native Windows x64 NSIS Installer):
+              - Requests Administrator privileges (`RequestExecutionLevel admin`) and supports silent enterprise deployment (`/S`).
+              - Verifies Microsoft Visual C++ 2015–2022 Redistributable (x64) (`$SYSDIR\VCRUNTIME140.dll` & `$SYSDIR\VCRUNTIME140_1.dll`) before installation.
+              - Installs directly into `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`:
+                1. `OpenMedia_Importer.prm` (Normal Priority `0x00`, `xImportEntry`)
+                2. `OpenMedia_ImporterHP.prm` (High-Priority Override `0x01`, `xImportEntry`)
+                3. `OpenMedia_Exporter.prm` (AV1 / VP9 / MKV / WebM Exporter, `xSDKExport`)
+                4. `OpenMediaCore.dll` (Shared C++17 / FFmpeg 7.1+ Core Engine)
+                5. `Config.toml` (Default Influx-v2 Dual-PRM & GPU Decode Policy configuration)
+                6. `THIRD_PARTY_LICENSES.md` & `README.md`
+              - Registers `Uninstall-OpenMedia.exe` in Windows Add/Remove Programs.
+            - **`OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Portable.zip`** (Portable archive containing the compiled `.prm` plugins, `OpenMediaCore.dll`, `Config.toml`, `THIRD_PARTY_LICENSES.md`, and `README.md`).
+            - **`SHA256SUMS.txt`** (SHA-256 cryptographic checksums).
