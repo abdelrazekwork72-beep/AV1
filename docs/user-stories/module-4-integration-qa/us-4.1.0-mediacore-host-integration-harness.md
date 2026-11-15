@@ -170,7 +170,13 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 3 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 Dual-PRM Validation, 4-GPU Concurrency Cap & `!` Modifier Benchmarks
-- **`unit-1` (`DeploymentValidator`)**: Verifies both `OpenMedia_Importer.prm` (PiPL `"OpenMedia Importer"`, normal priority) and `OpenMedia_ImporterHP.prm` (PiPL `"OpenMedia Importer "`, priority 100) load cleanly without symbol or FourCC collisions.
-- **`unit-2` (`ScrubLatencyBenchmark`)**: Benchmarks `evaluateDecodePolicy()` across `< 2560x1600` (CPU path) and `>= 2560x1600` (GPU path up to 4 concurrent streams, verifying the 5th stream routes to CPU) and verifies 0 dropped final frames on WebM/AV1 streams.
-- **`unit-3` (`AmeQueueValidator`)**: Tests `Config.toml` overrides and `!` filename suffix modifiers (`!w=`, `!fr=24000d1001`, `!cr=full`, `!rft=1`) across batch jobs.
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-4.1.0`)
+
+- **Dual-PRM Deployment & PiPL Trailing-Space Verification (`unit-1` — `deployment_validator.hpp/.cpp`)**:
+  - `validateDualPluginBinaries()` and `validateDualDirectEntryPoints()` verify both `OpenMedia_Importer.prm` (`ImporterPriorityTier::Normal = 0x00`, PiPL `'OpenMedia Importer'`) and `OpenMedia_ImporterHP.prm` (`ImporterPriorityTier::High = 0x01`, PiPL `'OpenMedia Importer '`).
+- **Dual-Policy CPU/GPU Scrubbing Benchmark & Final-Frame Retention (`unit-2` — `scrub_benchmark.hpp/.cpp`)**:
+  - `evaluateDecodePolicy()` and `runDualPolicyBenchmark()` verify `< 2560x1600` CPU routing, `>= 2560x1600` GPU routing up to 4 concurrent streams, automatic 5th-stream overflow to CPU, `< 50ms` p95 scrub latency, and 100% WebM/AV1 final-frame retention (`verifyFinalFrameRetention()`).
+- **`Config.toml` Policy Validation in AME Harness (`unit-3` — `ame_queue_validator.hpp/.cpp`)**:
+  - `validateConfigTomlPolicy()` verifies `packaging/Config.toml` settings (`[dual_prm]`, `[decode_policy]`, `gpu_min_width = 2560`, `gpu_min_height = 1600`, `max_gpu_streams = 4`) before running the 5-job batch queue.

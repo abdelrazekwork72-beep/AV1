@@ -209,5 +209,11 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 5 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 Out-of-Process JSON IPC (`--popup --owner HWND`) & Camera Gamut Metadata
-- **`unit-2` (`ExportParamBuilder`)**: Integrates `PopupIpcBridge` communicating over `StdIn`/`StdOut` using `json:`-prefixed payloads with an out-of-process settings/status window (`--popup --owner HWND`) displaying live `GPU Status` and editing `Config.toml` without crashing Adobe's internal Qt runtime, and exposes `BT.2100 HLG/PQ` and Sony `S-Log3` color metadata tags.
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-3.1.0`)
+
+- **Out-of-Process JSON IPC Bridge (`unit-2` — `PopupIpcBridge` in `export_param_builder.hpp/.cpp`)**:
+  - Builds isolated popup CLI arguments (`--popup --owner <HWND>`) and serializes/parses `json:`-prefixed messages over `StdIn`/`StdOut` containing `configTomlPath`, `PopupGpuStatus` (`activeDecoder`, `activeEncoder`, `hardwareAvailable`), and `ExporterPresetParams`.
+- **HDR & Sony Cinema Color Metadata Presets (`unit-2`)**:
+  - Adds `ExportColorMetadata` (`BT709`, `BT2100_PQ`, `BT2100_HLG`, `Sony_SLog3`) to export parameter trees and `.epr` preset serialization.

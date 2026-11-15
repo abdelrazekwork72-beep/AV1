@@ -201,8 +201,14 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete selector lifecycle Doxygen docs | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 Registration, `Config.toml` & `!` Modifiers Specifications
-- **`unit-1` (`ImporterEntry`)**: Implements `xOpenMediaImportEntry(selector, stdParms, param1, param2, bool isHighPriority)` supporting both normal-priority (`0x00`) and high-priority override (`0x01`) `.prm` shims, plus per-file error log deduplication (`reduceWarnings`).
-- **`unit-2` (`IMPT & PiPL Resources`)**: Registers `"OpenMedia Importer"` for `OpenMedia_Importer.prm` and `"OpenMedia Importer "` (with trailing space) for `OpenMedia_ImporterHP.prm`.
-- **`unit-3` (`FileProbe`)**: Parses `%APPDATA%\OpenMedia\Config.toml` (`overrideAdobe`, `overrideExtensions` case-insensitive with/without leading dot, `gpuDecodeMode`, `durationCalculation`) and filename suffix modifiers after the last `!` (`!w=`, `!h=`, `!vs=`, `!as=`, `!pf=`, `!fr=24000d1001`, `!cr=full|limited`, `!accurate_duration`, `!rft=1`), and rejects undecodable video files with `"No decodable video frames in file"`.
-- **`unit-4` (`StreamTracker`)**: Supports explicit stream filtering via `!vs=<index>` and `!as=<index>` (e.g., GoPro MAX 360 dual video streams) and expanded container formats (`MKV`, `WebM`, `MP4`, `MOV`, `AVI`, `FLV`, `BIK`/`BK2`, `OGG`, `TS`, `VOB`, `MXF`, `Y4M`, `QOI`, `APNG`, `WAV`, `AIFF`, `FLAC`, `Opus`, `AAC`, `MP3`, `AC3`, `DTS`).
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-2.1.0`)
+
+- **Dual-PRM Dispatcher & PiPL Trailing-Space Registration (`unit-1` & `unit-2`)**:
+  - `xOpenMediaImportEntry(selector, stdParms, param1, param2, isHighPriority)` dispatches both `OpenMedia_Importer.prm` (`kStandardImporterPriority = 100`, PiPL `'OpenMedia Importer'`) and `OpenMedia_ImporterHP.prm` (`kHighImporterPriority = 200`, PiPL `'OpenMedia Importer '` in `resources/importer_hp_resources.rc`, `resources/importer_hp_pipl.r`, and `resources/Info_ImporterHP.plist.in`).
+- **`Config.toml` Parser, `!` Filename Modifiers & Warning Deduplication (`unit-3` — `file_probe.hpp/.cpp`)**:
+  - `OpenMediaConfig::parseConfigToml()` parses `disable`, `overrideAdobe`, `overrideExtensions` (case-insensitive, `.mkv` or `MKV`), `disableAutomaticOverride`, `reduceWarnings`, `gpuDecodeMode` (`recommended`, `available`, `disabled`), `maxFrameCacheSizeMB` (`400`), `maxPercentUsageAvailableMemory` (`50`), `disableSeekingTable`, `disableThumbnailCache`, `thumbnailTimecode`, and `durationCalculation`.
+  - `FilenameModifiers::parseFilenameModifiers()` parses options after the last `!` before the extension (including `.influx` / `.openmedia`): `!w=`, `!h=` (with `resolveAspectRatio()`), `!vs=`, `!as=`, `!pf=` / `!pixel_format=`, `!fr=` / `!frame_rate=` (supporting `<num>d<den>`), `!cr=full|limited`, `!accurate_duration`, and `!rft=1`.
+  - `ErrorDeduplicator` suppresses duplicate per-frame warnings for the same file instance.
+- **Verification**: Tested in `tests/importer/test_influx_config_modifiers.cpp` and `tests/importer/test_importer_registration.cpp`.

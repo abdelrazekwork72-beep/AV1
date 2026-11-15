@@ -102,9 +102,12 @@ public:
 
 ---
 
-## 5. Influx v1.7.1 & v2.0.0 Beta 1 QA & Packaging Enhancements
+## 5. Influx-v2 Architecture Upgrades Implemented in Module 4
 
-1. **Dual-PRM (`OpenMedia_Importer.prm` + `OpenMedia_ImporterHP.prm`) & GPU Policy Verification (`US-4.1.0`)**:
-   - Validates simultaneous loading of both normal (`0x00`) and high-priority (`0x01`) importer shims, verifies `evaluateDecodePolicy()` ($2560 \times 1600$ resolution threshold and 4-stream GPU concurrency cap), tests `!` filename modifiers, and verifies final-frame retention in WebM/AV1 clips.
-2. **Dual-PRM + `Config.toml` Packaging & Visual C++ Redistributable Check (`US-4.2.0`)**:
-   - Packages `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`/`.dylib`, and default `Config.toml` into the installers, and checks for `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll` during installation on Windows.
+1. **Dual-PRM (`Normal` + `HP`) Validation & Dual-Policy Scrub Benchmark (`US-4.1.0`)**:
+   - `DeploymentValidator` loads and verifies both `OpenMedia_Importer.prm` (Normal `0x00`, PiPL `'OpenMedia Importer'`) and `OpenMedia_ImporterHP.prm` (High Priority `0x01`, PiPL `'OpenMedia Importer '` with trailing space) alongside `OpenMedia_Exporter.prm`.
+   - `ScrubLatencyBenchmark` benchmarks both `< 2560x1600` (CPU decode policy path) and `>= 2560x1600` (GPU decode policy path across 4 concurrent streams, verifying the 5th stream auto-routes to CPU and 100% final-frame retention in WebM/AV1 clips).
+   - `AmeQueueValidator` validates `packaging/Config.toml` policy settings alongside AME batch queue execution.
+2. **Dual-PRM + `Config.toml` Packaging & `VCRUNTIME140.dll` Check (`US-4.2.0`)**:
+   - `CPackConfig_Windows.cmake`, `CPackConfig_macOS.cmake`, and `.github/workflows/release-build.yml` bundle `OpenMedia_Importer.prm`/`.bundle`, `OpenMedia_ImporterHP.prm`/`.bundle`, `OpenMedia_Exporter.prm`/`.bundle`, `OpenMediaCore.dll`/`.dylib`, and `packaging/Config.toml`.
+   - `packaging/cpack/windows/wix_patch.xml` and `Install-MediaCore.ps1` verify `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll` presence with clear guidance for Microsoft Visual C++ Redistributable.

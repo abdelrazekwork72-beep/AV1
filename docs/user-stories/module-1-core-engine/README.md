@@ -264,15 +264,12 @@ public:
 
 ---
 
-## 5. Influx v1.7.1 & v2.0.0 Beta 1 Core Engine Enhancements
+## 5. Influx-v2 Architecture Upgrades Implemented in Module 1
 
-1. **Dual-PRM Build Targets & Binary Hardening (`US-1.1.0`)**:
-   - Builds both `OpenMedia_Importer.prm` (normal priority `0x00`) and `OpenMedia_ImporterHP.prm` (high priority `0x01`) from shared object library `OpenMedia_Importer_obj`, with Release `LTCG`, `AVX2`/`SSE4.1` SIMD flags, and Windows PE security flags (`ASLR`, `DEP/NX`, `High Entropy VA`).
-2. **WebM Final-Frame Drain, Timestamp Zeroing & Empty-Video Guard (`US-1.2.0` — `CoreDemuxer` & `CoreVideoDecoder`)**:
-   - Normalizes non-zero start timestamps (`start_time > 0` or `!rft=1`) so frame 0 corresponds to the first decoded picture.
-   - Drains all buffered frames at EOF so WebM (VP9/AV1) and Chrome/YouTube recordings never drop their final frame.
-   - Rejects files with zero decodable video frames (`CoreStatus::NoDecodableFrames`: `"No decodable video frames in file"`).
-   - Integrates `NVDEC`, `D3D11VA`, and `VideoToolbox` (Apple Silicon M1+) hardware decode contexts with `drainBeforeFallback()` for seamless CPU fallback.
-3. **Fault-Tolerant Audio, `xHE-AAC`, Silent Stream Synthesis & 5/6-Channel MOV PCM (`US-1.2.0` — `CoreAudioDecoder`)**:
-   - Supports `Opus`, `FLAC`, `Vorbis`, `xHE-AAC`, `AAC`, `MP3`, `AC3`, `DTS`, and 5/6-channel MOV `PCM` (e.g., ARRI AMIRA ProRes).
-   - Substitutes planar float silence (`0.0f`) on isolated corrupt audio packets or empty declared audio tracks instead of failing the import, and immediately releases OS file handles on fatal audio errors so files are never locked on Windows.
+1. **Dual-PRM Build Targets & Hardened Compiler/Linker Flags (`US-1.1.0`)**:
+   - `CMakeLists.txt` builds both `OpenMedia_Importer` (Normal Priority `0x00`) and `OpenMedia_ImporterHP` (High Priority `0x01`, `OPENMEDIA_HIGH_PRIORITY_SHIM=1` with `resources/importer_hp_resources.rc` and `resources/Info_ImporterHP.plist.in`).
+   - `cmake/CompilerWarnings.cmake` enables Release **LTCG / IPO**, **AVX2 / SSE4.1** SIMD flags, and Windows PE security flags (`/DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA`).
+2. **WebM/AV1/VP9 Final-Frame Retention, Zero-PTS & Hybrid GPU Hooks (`US-1.2.0`)**:
+   - `CoreDemuxer` (`demuxer.hpp/.cpp`) normalizes non-zero `start_time` to `PTS = 0`, rejects video-less/corrupt streams with `CoreStatus::NoDecodableFrames` (`"No decodable video frames in file"`), and unlocks OS file descriptors immediately on error.
+   - `CoreVideoDecoder` (`video_decoder.hpp/.cpp`) drains 100% of buffered EOF frames so WebM/MKV clips never drop their last frame, and implements `HwDecodeBackend` (`None`, `NVDEC`, `D3D11VA`, `VideoToolbox`) with `drainBeforeFallback()`.
+   - `CoreAudioDecoder` (`audio_decoder.hpp/.cpp`) supports `XHE_AAC`, `AAC`, `MP3`, `AC3`, and `DTS`, substitutes `0.0f` planar float silence for isolated damaged packets or empty tracks, and supports 5/6-channel MOV PCM.

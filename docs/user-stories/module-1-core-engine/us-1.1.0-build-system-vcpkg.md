@@ -218,6 +218,10 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete build and toolchain documentation | Doxygen / CMake docs | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 Build & Shim Enhancements
-- **Dual-PRM Target Generation (`unit-1`)**: `CMakeLists.txt` generates both `OpenMedia_Importer` (`isHighPriority = 0`) and `OpenMedia_ImporterHP` (`isHighPriority = 1`, `OPENMEDIA_HIGH_PRIORITY_SHIM=1`) alongside `OpenMedia_Exporter` and `OpenMediaCore`.
-- **Release Optimization & Memory Protection (`unit-1`)**: Enables `CMAKE_INTERPROCEDURAL_OPTIMIZATION` (LTCG) in Release mode, `AVX2`/`SSE4.1` SIMD instruction sets, and Windows linker protections (`/DYNAMICBASE`, `/NXCOMPAT`, `/HIGHENTROPYVA`).
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-1.1.0`)
+
+- **Dual-PRM Target Generation (`unit-1`)**: `CMakeLists.txt` defines `OpenMedia_Importer` (Normal Priority `0x00`) and `OpenMedia_ImporterHP` (High-Priority Override `0x01` compiled with `OPENMEDIA_HIGH_PRIORITY_SHIM=1` and linked with `resources/importer_hp_resources.rc` on Windows and `resources/Info_ImporterHP.plist.in` on macOS).
+- **Release LTCG, AVX2 SIMD & PE Security Hardening (`unit-1`)**: `cmake/CompilerWarnings.cmake` configures `openmedia_apply_release_hardening()` enabling Link-Time Code Generation (`CMAKE_INTERPROCEDURAL_OPTIMIZATION`), `AVX2`/`SSE4.1` instructions, and Windows PE security flags (`/DYNAMICBASE`, `/NXCOMPAT`, `/HIGHENTROPYVA`).
+- **Verification**: `tests/build/test_cmake_targets.cmake` verifies both `OpenMedia_Importer` and `OpenMedia_ImporterHP` targets and hardening macros.

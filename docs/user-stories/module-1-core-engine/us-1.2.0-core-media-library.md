@@ -220,7 +220,17 @@ AV1/
 | **Gate G-Docs** | Documentation | 100% public classes in `include/openmedia/*.hpp` documented | Doxygen verification | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 Core Media Library Enhancements
-- **`unit-1` (`CoreDemuxer`)**: Normalizes non-zero first-frame timestamps (`start_time > 0` / `!rft=1`) to `0`, rejects files with zero decodable video frames (`"No decodable video frames in file"`), and guarantees immediate OS file descriptor closure on audio/video probe errors to prevent Windows file locking.
-- **`unit-2` (`CoreVideoDecoder`)**: Fixes WebM (VP9/AV1, Chrome, YouTube) final-frame loss via complete EOF frame queue draining, and adds `NVDEC` / `D3D11VA` / `VideoToolbox` hardware decode context hooks with `drainBeforeFallback()` to safely flush and revert to CPU decoding on hardware failure.
-- **`unit-3` (`CoreAudioDecoder`)**: Adds `xHE-AAC`, `AAC`, `MP3`, `AC3`, `DTS`, and 5/6-channel MOV `PCM` (ARRI AMIRA ProRes) support, replaces isolated corrupted audio packets with zero-filled 32-bit float planar silence (`0.0f`), and synthesizes silence for declared empty audio tracks.
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-1.2.0`)
+
+- **Zero-PTS Normalization, Empty-Video Rejection & Immediate File Unlock (`unit-1` — `CoreDemuxer`)**:
+  - Normalizes positive stream `start_time` offsets so frame 0 starts at `PTS = 0` (`setResetFirstTimestamp(true)`).
+  - Returns `CoreStatus::NoDecodableFrames` with diagnostic message `"No decodable video frames in file"` (`kNoDecodableVideoFramesMsg`) when a video container has zero decodable frames.
+  - Immediately closes OS file handles upon audio/video probe failure so files are never locked on Windows.
+- **WebM Final-Frame EOF Drain & Hybrid GPU `drainBeforeFallback()` (`unit-2` — `CoreVideoDecoder`)**:
+  - Guarantees 100% EOF frame draining so WebM (VP9/AV1, Chrome screen recordings, YouTube downloads) never drop their final frame.
+  - Supports `HwDecodeBackend` (`NVDEC`, `D3D11VA`, `VideoToolbox`) and `drainBeforeFallback()` to flush buffered frames and seamlessly switch to CPU (`libdav1d` / `libvpx-vp9`) on hardware fault.
+- **Fault-Tolerant Audio Silence Substitution & 5/6-Channel MOV PCM (`unit-3` — `CoreAudioDecoder`)**:
+  - Adds `CodecId::XHE_AAC`, `CodecId::AAC`, `CodecId::MP3`, `CodecId::AC3`, and `CodecId::DTS`.
+  - Substitutes zero-filled planar float silence (`0.0f`) when encountering isolated corrupted packets or empty audio streams instead of aborting import, and supports 5-channel and 6-channel MOV PCM layouts (ARRI AMIRA ProRes).

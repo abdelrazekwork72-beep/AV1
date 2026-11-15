@@ -208,5 +208,11 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 5 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 WebM/MKV Final-Frame Retention & Zero-Timestamp Alignment
-- **`unit-5` (`GopTailFlusher`)**: Ensures 100% of delayed lookahead frames are flushed and written before `av_write_trailer` so exported WebM (VP9/AV1) and MKV files never lose their final frame, with frame 0 normalized to `PTS = 0`.
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-3.2.0`)
+
+- **Zero-PTS First-Frame Normalization (`unit-1` & `unit-2` — `push_render_loop.hpp/.cpp` & `pull_sequence_renderer.hpp/.cpp`)**:
+  - Normalizes non-zero initial timeline frame timestamps so exported streams always start cleanly at `PTS = 0`.
+- **100% EOF Final-Frame Retention (`unit-5` — `gop_tail_flusher.hpp/.cpp`)**:
+  - Drains all buffered lookahead and B-frames at sequence EOF and verifies final frame delivery before writing Matroska/WebM Cues and trailer.

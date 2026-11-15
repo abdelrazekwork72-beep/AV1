@@ -182,17 +182,16 @@ public:
 
 ---
 
-## 5. Influx v1.7.1 & v2.0.0 Beta 1 Importer Enhancements
+## 5. Influx-v2 Architecture Upgrades Implemented in Module 2
 
-1. **Dual-PRM Shim (`OpenMedia_Importer.prm` & `OpenMedia_ImporterHP.prm`) & PiPL Trailing-Space Trick (`US-2.1.0`)**:
-   - `OpenMedia_Importer.prm` passes `isHighPriority = false` (`0x00`) with PiPL name `"OpenMedia Importer"` (normal fallback priority).
-   - `OpenMedia_ImporterHP.prm` passes `isHighPriority = true` (`0x01`) with PiPL name `"OpenMedia Importer "` (trailing space) and `priority = 100` to override built-in Adobe importers when configured.
-2. **`Config.toml` & `!` Filename Suffix Modifiers (`US-2.1.0`)**:
-   - Parses `%APPDATA%\OpenMedia\Config.toml` (`disable`, `overrideAdobe`, `overrideExtensions`, `disableAutomaticOverride`, `debugLogs`, `reduceWarnings`, `disableMultithreading`, `disableFrameCache`, `maxFrameCacheSizeMB = 400`, `maxPercentUsageAvailableMemory = 50`, `disableSeekingTable`, `disableThumbnailCache`, `thumbnailTimecode`, `maxLogFileSizeMB = 50`, `durationCalculation`, `gpuDecodeMode`).
-   - Parses per-file suffix modifiers after the last `!` in filenames: `!w=`, `!h=` (auto aspect ratio), `!vs=`, `!as=` (GoPro MAX 360 stream selection), `!pf=` / `!pixel_format=`, `!fr=` / `!frame_rate=` (e.g. `24000d1001`), `!cr=full|limited`, `!accurate_duration`, and `!rft=1`.
-3. **Direct GPU Color Conversion & Camera Gamuts (`US-2.2.0`)**:
-   - Direct `NV12` / `P010LE` $\to$ `BGRA` conversion on GPU/SIMD and support for `sRGB`, `BT.601`, `BT.709`, `BT.2020`, `BT.2100 HLG/PQ`, `DCDM X'Y'Z'`, and Sony `SGamut/SLog2`, `SGamut3/SLog3`, `Cine/SLog3`.
-4. **Smart GPU Decode Policy (`evaluateDecodePolicy`), 4-Stream GPU Cap & SQLite `STRICT` Thumbnail Cache (`US-2.3.0`)**:
-   - Enforces resolution threshold ($\ge 2560 \times 1600$ in `"recommended"` mode), caps concurrent GPU-decoded streams at **4 per Adobe application** (routing the 5th+ to CPU), executes `drainBeforeFallback()` on GPU error with once-per-session warning deduplication, and stores Media Browser thumbnails in a local SQLite 3 `STRICT` database (`tableVersion` and `thumbnails` tables).
-5. **Fault-Tolerant Audio & 5/6-Channel MOV PCM (`US-2.4.0`)**:
-   - Supports `xHE-AAC`, corrupt packet silence substitution, silent track import, 5/6-channel MOV PCM, and up to 24/32 channels without locking files on Windows.
+1. **Dual-PRM Shims & PiPL Trailing-Space Trick (`US-2.1.0`)**:
+   - `OpenMedia_Importer.prm` (`isHighPriority = false`, priority `100`, PiPL `'OpenMedia Importer'`) and `OpenMedia_ImporterHP.prm` (`isHighPriority = true`, priority `200`, PiPL `'OpenMedia Importer '` with trailing space) both route through `xOpenMediaImportEntry()`.
+   - `FileProbe` includes `OpenMediaConfig` (`Config.toml` parser), `FilenameModifiers` (`!w=`, `!h=`, `!vs=`, `!as=`, `!pf=`, `!fr=24000d1001`, `!cr=full|limited`, `!accurate_duration`, `!rft=1`), and `ErrorDeduplicator` (`reduceWarnings`).
+2. **Direct GPU/SIMD `NV12`/`P010LE` Conversion & Extended Camera Color Spaces (`US-2.2.0`)**:
+   - `PixelFormatHdrEngine` and `FrameScaler` provide direct `NV12` and `P010LE` to `BGRA8`/`RGB444_10U` conversion and support `sRGB`, `BT.601`, `BT.709`, `BT.2020`, `BT.2100_HLG`, `BT.2100_PQ`, `DCDM_XYZ`, `Sony_SGamut_SLog2`, `Sony_SGamut3_SLog3`, and `Sony_Cine_SLog3`.
+3. **Smart GPU Decode Policy Engine (`evaluateDecodePolicy`), 4-Stream Cap & SQLite `STRICT` Thumbnail Cache (`US-2.3.0`)**:
+   - `D3D11VaNvdecDecoder::evaluateDecodePolicy()` routes clips `< 2560x1600` (`4,096,000` px) to CPU and clips `>= 2560x1600` to GPU up to `kMaxConcurrentGpuDecoders = 4` active GPU streams (routing the 5th+ stream to CPU), with `drainBeforeFallback()` on hardware error.
+   - `PPixCacheBridge` persists Media Browser thumbnails in SQLite 3 `STRICT` tables (`tableVersion` and `thumbnails`).
+   - `KeyframeRingBuffer` performs exact-frame open-GOP / Long-GOP seeking.
+4. **Fault-Tolerant Audio & 5/6/24/32-Channel Routing (`US-2.4.0`)**:
+   - `AudioExtractor` substitutes `0.0f` planar silence on damaged packets and immediately releases file descriptors on fatal init error; `MultiChannelRouter` supports 5/6-channel MOV PCM and up to 24/32 discrete channels.

@@ -193,7 +193,11 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete Doxygen docs for all 5 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 GPU Direct Color & Camera Gamut Specifications
-- **`unit-1` (`SourceVideoHandler`)**: Honors `!w=`, `!h=`, `!pf=`, and `!rft=1` modifiers and guarantees WebM/VP9/AV1 final-frame delivery at clip EOF.
-- **`unit-2` & `unit-3` (`PixelFormat8uEngine` & `PixelFormatHdrEngine`)**: Support forced pixel formats (`argb`, `bgra`, `bgra64`, `yuv420p`, `yuv420p10u`, `uyvy422`, `vuya`) and camera color spaces (`sRGB`, `BT.601`, `BT.709`, `BT.2020`, `BT.2100 HLG/PQ`, `DCDM X'Y'Z'`, `Sony SGamut/SLog2`, `SGamut3/SLog3`, `Cine/SLog3`).
-- **`unit-5` (`FrameScaler`)**: Implements direct GPU/SIMD `NV12` and `P010LE` $\to$ `BGRA` conversion (`cuda_bgra_nv12` / `cuda_bgra_p010` fast-path) and honors `!cr=full` (0–255) and `!cr=limited` (16–235) color range overrides.
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-2.2.0`)
+
+- **Direct GPU/SIMD `NV12` & `P010LE` to `BGRA8` / `RGB444_10U` Fast-Path (`unit-3` & `unit-5`)**:
+  - `PixelFormatHdrEngine::convertNv12ToBgra8()`, `convertP010ToBgra8()`, and `convertP010ToRgb444_10u()` (alongside `FrameScaler`) perform direct 16-byte aligned color conversion modeling Influx v2's `cuda_bgra_nv12` and `cuda_bgra_p010` pipeline.
+- **Extended Cinema & HDR Transfer/Gamut Support (`unit-3` & `unit-5`)**:
+  - Adds `ExtendedColorSpace` / transfer support for `sRGB`, `BT.601`, `BT.709`, `BT.2020`, `BT.2100_HLG`, `BT.2100_PQ`, `DCDM_XYZ`, `Sony_SGamut_SLog2`, `Sony_SGamut3_SLog3`, and `Sony_Cine_SLog3`.

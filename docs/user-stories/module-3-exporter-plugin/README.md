@@ -151,8 +151,11 @@ struct ExporterInstance {
 
 ---
 
-## 6. Influx v2 Parity & Out-of-Process IPC Enhancements
+## 6. Influx-v2 Architecture Upgrades Implemented in Module 3
 
-1. **Out-of-Process JSON IPC Bridge (`US-3.1.0`)**: Communicates configuration (`Config.toml`), license/version metadata, and active `GPU Status` with an isolated desktop popup process (`--popup --owner HWND`) over `StdIn`/`StdOut` with `json:`-prefixed payloads, avoiding Qt GUI conflicts inside Adobe Premiere Pro.
-2. **WebM/MKV Final-Frame Export Guarantee (`US-3.2.0`)**: Ensures `GopTailFlusher` drains all delayed frames at EOF and normalizes start timestamps so exported WebM/MKV files never drop their last frame.
-3. **`drainBeforeFallback()` & Single-Session Warning Guard (`US-3.3.0`)**: Drains hardware encoder queues cleanly before switching to software encoding (`libsvtav1` / `libvpx-vp9`) and suppresses repetitive warning dialogs (`reduceWarnings`).
+1. **Out-of-Process JSON IPC Bridge (`PopupIpcBridge`) & HDR/Cinema Color Metadata (`US-3.1.0`)**:
+   - `PopupIpcBridge` (`export_param_builder.hpp/.cpp`) exchanges `json:`-prefixed lines over `StdIn`/`StdOut` (`--popup --owner <HWND>`) carrying `Config.toml` paths, `PopupGpuStatus` (`GPU Status` panel), and `ExporterPresetParams` (`ExportColorMetadata`: `BT709`, `BT2100_PQ`, `BT2100_HLG`, `Sony_SLog3`) so external UI tools never conflict with Premiere Pro's internal Qt runtime.
+2. **Zero-PTS Normalization & 100% EOF Frame Drain (`US-3.2.0`)**:
+   - `PushRenderLoop`, `PullSequenceRenderer`, and `GopTailFlusher` normalize the first exported frame timestamp to `PTS = 0` and drain 100% of trailing GOP frames at sequence EOF so exported WebM/MKV clips never lose their final frame.
+3. **Hardware Encoder `drainBeforeFallback()` & Session Warning Deduplication (`US-3.3.0`)**:
+   - `ChromaFallbackGuard::drainBeforeFallback()` flushes pending frames before switching from `NVENC`/`AMF`/`QSV`/`Vulkan` to `libsvtav1`/`libvpx-vp9` and uses `FallbackSessionState` to emit at most one warning per session via `PrSDKErrorSuite` (`reduceWarnings`).

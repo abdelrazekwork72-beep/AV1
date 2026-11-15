@@ -173,6 +173,11 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete packaging and licensing documentation | `THIRD_PARTY_LICENSES.md` verified | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 Dual-PRM Bundle, `Config.toml` Deployment & VC++ Redistributable Guard
-- **`unit-1` (`Windows Installer`)**: Bundles `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`, and default `Config.toml`, and verifies `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll` presence with a clear guidance prompt if Microsoft Visual C++ Redistributable is missing.
-- **`unit-2` (`macOS Installer`)**: Bundles `OpenMedia_Importer.bundle`, `OpenMedia_ImporterHP.bundle`, `OpenMedia_Exporter.bundle`, and `libOpenMediaCore.dylib` with Apple Silicon (`arm64` VideoToolbox) support.
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-4.2.0`)
+
+- **Dual-PRM & `Config.toml` Distribution (`unit-1` & `unit-2` — `CPackConfig_Windows.cmake`, `CPackConfig_macOS.cmake`, `.github/workflows/release-build.yml`)**:
+  - Installs both `OpenMedia_Importer.prm`/`.bundle` and `OpenMedia_ImporterHP.prm`/`.bundle`, `OpenMedia_Exporter.prm`/`.bundle`, `OpenMediaCore.dll`/`.dylib`, and `packaging/Config.toml` into `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore` (Windows) and `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore` (macOS).
+- **Visual C++ Redistributable (`VCRUNTIME140.dll`) Verification (`unit-1` — `wix_patch.xml` & `Install-MediaCore.ps1`)**:
+  - Checks `System32` for `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll` during installation and emits an actionable guidance message if Microsoft Visual C++ Redistributable (x64) is missing.

@@ -216,5 +216,10 @@ AV1/
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 6 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
 
-### 1.4 `drainBeforeFallback()` & Once-Per-Session Warning Deduplication
-- **`unit-6` (`ChromaFallbackGuard`)**: Implements `drainBeforeFallback()` to drain any in-flight hardware packets before switching to CPU encoding (`libsvtav1` / `libvpx-vp9`), and deduplicates `PrSDKErrorSuite` hardware warnings to once per Adobe session when `reduceWarnings` is active.
+---
+
+## 7. Influx-v2 Architecture Upgrades (`US-3.3.0`)
+
+- **Graceful Hardware `drainBeforeFallback()` & Warning Deduplication (`unit-2` & `unit-6` — `nvenc_encoder.hpp/.cpp` & `chroma_fallback_guard.hpp/.cpp`)**:
+  - `ChromaFallbackGuard::drainBeforeFallback()` transfers all pending `RawVideoFrame` items into `outFlushedFrames` before switching from failed hardware encoders (`av1_nvenc`, `av1_amf`, `av1_qsv`, `av1_vulkan`) to CPU (`libsvtav1` / `libvpx-vp9`).
+  - Tracks `FallbackSessionState` (`warningEmitted`, `warningsSuppressed`) so `PrSDKErrorSuite` is notified at most once per session when `reduceWarnings = true`.
