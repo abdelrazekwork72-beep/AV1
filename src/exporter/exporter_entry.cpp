@@ -59,6 +59,18 @@ csSDK_int32 ExporterEntry::dispatch(csSDK_int32 selector, exportStdParms* stdPar
     }
     return kExNoErr;
 }
+
+std::vector<std::string> ExporterEntry::buildPopupLaunchArgs(uint64_t ownerHwnd) {
+    return PopupIpcBridge::buildLaunchArgs(ownerHwnd);
+}
+
+bool ExporterEntry::exchangePopupSettings(std::istream& in,
+                                          std::ostream& out,
+                                          const PopupIpcMessage& request,
+                                          PopupIpcMessage& outResponse) {
+    return PopupIpcBridge::exchangeOverStreams(in, out, request, outResponse);
+}
+
 } // namespace openmedia::exporter
 
 extern "C" DllExport PREMPLUGENTRY xSDKExport(csSDK_int32 selector, exportStdParms* stdParms, void* param1, void* param2) {

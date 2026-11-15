@@ -2,6 +2,7 @@
 /// @file exporter_entry.hpp
 /// @brief Adobe MediaCore Exporter entry point (xSDKExport) and multi-container iteration.
 
+#include "exporter/export_param_builder.hpp"
 #include "exporter/exporter_types.hpp"
 
 #ifndef DllExport
@@ -21,7 +22,7 @@ DllExport PREMPLUGENTRY xSDKExport(csSDK_int32 selector,
 
 namespace openmedia::exporter {
 
-/// @brief Manages multi-container exporter registration (MKV, WebM, AV1 MP4) and selector dispatch.
+/// @brief Manages multi-container exporter registration (MKV, WebM, AV1 MP4), selector dispatch, and popup IPC.
 class ExporterEntry {
 public:
     /// @brief Handle exSelStartup iterating MKV (0), WebM (1), and AV1 MP4 (2).
@@ -37,6 +38,13 @@ public:
                                 exportStdParms* stdParms,
                                 void* param1,
                                 void* param2) noexcept;
+    /// @brief Build isolated out-of-process popup command arguments (--popup --owner <HWND>).
+    static std::vector<std::string> buildPopupLaunchArgs(uint64_t ownerHwnd);
+    /// @brief Exchange json:-prefixed settings and GPU status over StdIn/StdOut streams.
+    static bool exchangePopupSettings(std::istream& in,
+                                      std::ostream& out,
+                                      const PopupIpcMessage& request,
+                                      PopupIpcMessage& outResponse);
 };
 
 } // namespace openmedia::exporter
