@@ -29,4 +29,17 @@ std::vector<std::string> NvencEncoder::filterAv1Options(const std::vector<std::s
     return out;
 }
 
+bool NvencEncoder::shouldFallbackMidRender(int32_t nvencStatusCode, bool deviceLost) noexcept {
+    return deviceLost || nvencStatusCode != 0;
+}
+
+std::string NvencEncoder::handleMidRenderFailure(std::vector<openmedia::RawVideoFrame>& pendingFrames,
+                                                 std::vector<openmedia::RawVideoFrame>& outFlushedFrames,
+                                                 FallbackSessionState& sessionState,
+                                                 const PrSDKErrorSuite* errorSuite,
+                                                 bool reduceWarnings) {
+    return ChromaFallbackGuard::drainBeforeFallback(
+        "av1_nvenc", pendingFrames, outFlushedFrames, sessionState, errorSuite, reduceWarnings);
+}
+
 } // namespace openmedia::exporter
