@@ -13,7 +13,10 @@ namespace openmedia {
 
 /// @brief Concrete FFmpeg-backed container multiplexer implementing ICoreMuxer.
 /// @details Uses the Pimpl idiom to isolate libavformat/libavcodec types from
-///          downstream Premiere Pro SDK translation units.
+///          downstream Premiere Pro SDK translation units. Supports Influx-v2
+///          video, subtitle, and expanded audio codecs (Opus, FLAC, Vorbis, PCM,
+///          XHE_AAC, AAC, MP3, AC3, DTS) with zero-PTS interleaved ordering and
+///          RAII handle closure on trailer or error.
 class CoreMuxer final : public ICoreMuxer {
 public:
     /// @brief Constructs an uninitialized CoreMuxer instance.
@@ -37,22 +40,23 @@ public:
     /// @return CoreStatus::Ok on success, InvalidArgument on bad inputs, or OpenFailed on I/O error.
     CoreStatus openContainer(const std::string& path, const std::string& formatName) override;
 
-    /// @brief Registers a video, audio, or subtitle stream in the open container.
+    /// @brief Registers a video, audio (including XHE_AAC, AAC, MP3, AC3, DTS), or subtitle stream.
     /// @param streamConfig Stream metadata, codec parameters, and optional extradata.
     /// @return Zero-based assigned stream index on success, or -1 on failure.
     int32_t addStream(const MuxerStreamConfig& streamConfig) override;
 
     /// @brief Writes the container header after all streams have been registered.
-    /// @return CoreStatus::Ok on success, NotInitialized if not open, or InvalidArgument if no streams exist.
+    /// @return CoreStatus::Ok on success, NotInitialized if not open, InvalidArgument if no streams exist,
+    ///         or OpenFailed on header I/O error (cleanly closing the container handle).
     CoreStatus writeHeader() override;
 
-    /// @brief Writes a compressed packet using interleaved timestamp ordering.
+    /// @brief Writes a compressed packet using zero-PTS-safe interleaved timestamp ordering.
     /// @param packet Compressed packet with valid streamIndex and non-decreasing DTS per stream.
     /// @return CoreStatus::Ok on success, NotInitialized if header not written, or InvalidArgument on invalid packet/order.
     CoreStatus writeInterleavedPacket(const EncodedPacket& packet) override;
 
-    /// @brief Finalizes container Cues/SeekHead trailer and closes the output file.
-    /// @return CoreStatus::Ok on success or NotInitialized if container was not opened.
+    /// @brief Finalizes container Cues/SeekHead trailer and cleanly closes the output handle.
+    /// @return CoreStatus::Ok on success, NotInitialized if container was not opened, or EncodeFailed on trailer I/O error.
     CoreStatus writeTrailerAndClose() override;
 
 private:
