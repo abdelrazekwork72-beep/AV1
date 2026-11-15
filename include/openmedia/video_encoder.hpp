@@ -12,9 +12,10 @@
 
 namespace openmedia {
 
-/// @brief Concrete FFmpeg-backed video encoder supporting AV1 (libsvtav1 / av1_nvenc) and VP9 (libvpx-vp9).
+/// @brief Concrete FFmpeg-backed video encoder supporting AV1 (av1_nvenc / libsvtav1 / libaom-av1) and VP9 (libvpx-vp9).
 /// @details Uses the Pimpl idiom to isolate all FFmpeg types from the public ABI boundary,
-///          enforces 16-byte aligned frame buffers, and drains delayed GOP packets on flush().
+///          enforces 16-byte aligned frame buffers, normalizes zero-based PTS timestamps,
+///          falls back safely from hardware to CPU encoders, and drains delayed GOP packets on flush().
 class CoreVideoEncoder final : public ICoreVideoEncoder {
 public:
     /// @brief Constructs an uninitialized CoreVideoEncoder instance.
@@ -42,7 +43,7 @@ public:
     /// @param frame Input RawVideoFrame matching the initialized dimensions and pixel format.
     /// @param outPackets Output vector receiving newly produced EncodedPacket instances.
     /// @return CoreStatus::Ok on success, CoreStatus::NotInitialized if uninitialized,
-    ///         CoreStatus::InvalidArgument on frame mismatch, or CoreStatus::EncodeFailed on encoder error.
+    ///         CoreStatus::InvalidArgument on frame mismatch, or CoreStatus::EncodeFailed on encoder/post-EOF error.
     CoreStatus encodeFrame(const RawVideoFrame& frame, std::vector<EncodedPacket>& outPackets) override;
 
     /// @brief Flushes delayed GOP frames at end-of-stream and appends remaining packets to outPackets.
@@ -69,6 +70,13 @@ public:
     static constexpr int32_t normalizeCrfToVp9Cq(int32_t crf) noexcept {
         const int32_t clamped = std::clamp(crf, 0, 63);
         return (clamped * 51 + 31) / 63;
+    }
+
+    /// @brief Normalizes a frame presentation timestamp to zero-based non-negative PTS.
+    /// @param pts Input presentation timestamp.
+    /// @return Non-negative PTS (negative values are clamped to 0 for Influx-v2 alignment).
+    static constexpr int64_t normalizePts(int64_t pts) noexcept {
+        return (pts < 0) ? 0 : pts;
     }
 
 private:

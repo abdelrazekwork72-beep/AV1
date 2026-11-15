@@ -1,6 +1,8 @@
 /// @file test_audio_decoder.cpp
 /// @brief Standalone unit test TC-1.2.3 for CoreAudioDecoder PCM-to-float precision,
-///        5.1 (6-channel) planar layout, [-1.0f, 1.0f] clamping bounds, and decoder lifecycle.
+///        5-channel/6-channel MOV PCM layouts, xHE-AAC/AAC/MP3/AC3/DTS support,
+///        corrupt-packet 0.0f silence substitution, zero-packet silent track synthesis,
+///        [-1.0f, 1.0f] clamping bounds, and decoder lifecycle.
 
 #include "openmedia/audio_decoder.hpp"
 
@@ -112,6 +114,23 @@ bool verifyAllPlanes(const openmedia::RawAudioBatch& batch, int32_t expectedChan
     return true;
 }
 
+bool verifySilentBatch(const openmedia::RawAudioBatch& batch, int32_t expectedChannels) {
+    if (batch.numSamples <= 0) {
+        return false;
+    }
+    if (!verifyAllPlanes(batch, expectedChannels, batch.numSamples)) {
+        return false;
+    }
+    for (int32_t ch = 0; ch < expectedChannels; ++ch) {
+        for (float val : batch.channelData[static_cast<size_t>(ch)]) {
+            if (val != 0.0f) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool testSurround51PlanarLayout() {
     constexpr int32_t kChannels51 = 6;
     constexpr int32_t kSamplesPerChannel = 1024;
@@ -142,6 +161,23 @@ openmedia::EncodedPacket makeSyntheticPcmPacket(int32_t channels, int32_t frames
     for (int32_t i = 0; i < frames * channels; ++i) {
         const auto val = static_cast<int16_t>((i % 2 == 0) ? 16384 : -16384);
         std::memcpy(pkt.data.data() + static_cast<size_t>(i) * sizeof(int16_t), &val, sizeof(int16_t));
+    }
+    return pkt;
+}
+
+openmedia::EncodedPacket makeSyntheticPcm24Packet(int32_t channels, int32_t frames) {
+    openmedia::EncodedPacket pkt;
+    pkt.pts = 200;
+    pkt.dts = 200;
+    pkt.duration = frames;
+    pkt.isKeyFrame = true;
+    pkt.data.resize(static_cast<size_t>(channels * frames) * 3U);
+    for (int32_t i = 0; i < frames * channels; ++i) {
+        const int32_t sample24 = (i % 2 == 0) ? 4194304 : -4194304;
+        const size_t off = static_cast<size_t>(i) * 3U;
+        pkt.data[off] = static_cast<uint8_t>(sample24 & 0xFF);
+        pkt.data[off + 1U] = static_cast<uint8_t>((sample24 >> 8) & 0xFF);
+        pkt.data[off + 2U] = static_cast<uint8_t>((sample24 >> 16) & 0xFF);
     }
     return pkt;
 }
@@ -228,11 +264,129 @@ bool testCoreAudioDecoderLifecycle() {
     return decoder.decodeAudioBatch(64, resetBatch) == openmedia::CoreStatus::NeedMoreData;
 }
 
+bool testSupportedCodecsAndCorruptPacketTolerance() {
+    static constexpr openmedia::CodecId kNewCodecs[] = {
+        openmedia::CodecId::XHE_AAC,
+        openmedia::CodecId::AAC,
+        openmedia::CodecId::MP3,
+        openmedia::CodecId::AC3,
+        openmedia::CodecId::DTS,
+    };
+    for (openmedia::CodecId codec : kNewCodecs) {
+        openmedia::CoreAudioDecoder decoder;
+        openmedia::StreamInfo stream;
+        stream.type = openmedia::MediaType::Audio;
+        stream.codec = codec;
+        stream.sampleRate = 48000;
+        stream.channels = 2;
+        if (decoder.initialize(stream, 48000) != openmedia::CoreStatus::Ok) {
+            return false;
+        }
+        openmedia::EncodedPacket corrupt;
+        corrupt.pts = 0;
+        corrupt.data = {0xDE, 0xAD, 0xBE, 0xEF};
+        if (decoder.sendPacket(corrupt) != openmedia::CoreStatus::Ok) {
+            return false;
+        }
+        openmedia::RawAudioBatch batch;
+        if (decoder.decodeAudioBatch(1024, batch) != openmedia::CoreStatus::Ok) {
+            return false;
+        }
+        if (!verifySilentBatch(batch, 2)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool testCorruptPcmPacketRecovery() {
+    openmedia::CoreAudioDecoder decoder;
+    openmedia::StreamInfo stream;
+    stream.type = openmedia::MediaType::Audio;
+    stream.codec = openmedia::CodecId::PCM;
+    stream.sampleRate = 48000;
+    stream.channels = 6;
+    stream.bitDepth = 16;
+    if (decoder.initialize(stream, 48000) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    openmedia::EncodedPacket truncated;
+    truncated.pts = 0;
+    truncated.data = {0x12, 0x34, 0x56};
+    if (decoder.sendPacket(truncated) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    openmedia::RawAudioBatch silenceBatch;
+    if (decoder.decodeAudioBatch(1024, silenceBatch) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    if (!verifySilentBatch(silenceBatch, 6)) {
+        return false;
+    }
+    return verifyDecodedPcmBatch(decoder);
+}
+
+bool testZeroPacketSilentTrackSynthesis() {
+    openmedia::CoreAudioDecoder decoder;
+    openmedia::StreamInfo stream;
+    stream.type = openmedia::MediaType::Audio;
+    stream.codec = openmedia::CodecId::AAC;
+    stream.sampleRate = 48000;
+    stream.channels = 2;
+    if (decoder.initialize(stream, 48000) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    if (decoder.flush() != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    openmedia::RawAudioBatch batch;
+    if (decoder.decodeAudioBatch(2048, batch) != openmedia::CoreStatus::Ok) {
+        return false;
+    }
+    if (!verifySilentBatch(batch, 2)) {
+        return false;
+    }
+    openmedia::RawAudioBatch eofBatch;
+    return decoder.decodeAudioBatch(1024, eofBatch) == openmedia::CoreStatus::EndOfFile;
+}
+
+bool testFiveAndSixChannelMovPcm() {
+    static constexpr int32_t kChannelsList[] = {5, 6};
+    for (int32_t ch : kChannelsList) {
+        openmedia::CoreAudioDecoder decoder;
+        openmedia::StreamInfo stream;
+        stream.type = openmedia::MediaType::Audio;
+        stream.codec = openmedia::CodecId::PCM;
+        stream.sampleRate = 48000;
+        stream.channels = ch;
+        stream.bitDepth = 24;
+        if (decoder.initialize(stream, 48000) != openmedia::CoreStatus::Ok) {
+            return false;
+        }
+        openmedia::EncodedPacket pkt = makeSyntheticPcm24Packet(ch, 64);
+        if (decoder.sendPacket(pkt) != openmedia::CoreStatus::Ok) {
+            return false;
+        }
+        openmedia::RawAudioBatch batch;
+        if (decoder.decodeAudioBatch(64, batch) != openmedia::CoreStatus::Ok) {
+            return false;
+        }
+        if (batch.numSamples != 64 || !verifyAllPlanes(batch, ch, 64)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
     if (!testPrecisionSnr() || !testClampingBounds() ||
-        !testSurround51PlanarLayout() || !testCoreAudioDecoderLifecycle()) {
+        !testSurround51PlanarLayout() || !testCoreAudioDecoderLifecycle() ||
+        !testSupportedCodecsAndCorruptPacketTolerance() ||
+        !testCorruptPcmPacketRecovery() ||
+        !testZeroPacketSilentTrackSynthesis() ||
+        !testFiveAndSixChannelMovPcm()) {
         std::cerr << "[TC-1.2.3] FAIL\n";
         return 1;
     }

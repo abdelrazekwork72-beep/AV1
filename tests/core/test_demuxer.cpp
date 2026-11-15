@@ -16,7 +16,6 @@
 
 namespace {
 
-
 const std::vector<uint8_t> kValidAv1Extradata = {
     0x0AU, 0x0AU, 0x00U, 0x00U, 0x00U, 0x02U,
     0xAFU, 0xFFU, 0x80U, 0x5FU, 0x00U, 0x08U
@@ -28,6 +27,14 @@ const std::vector<uint8_t> kValidAv1KeyPacket = {
     0x10U, 0x00U, 0xA8U, 0x82U, 0x04U, 0x10U, 0x20U, 0x81U,
     0x00U, 0x02U, 0x98U, 0x20U
 };
+
+void writeDummyFixtureFile(const std::filesystem::path& path) {
+    std::ofstream out(path, std::ios::binary);
+    assert(out.is_open());
+    const char kStub[] = "OPENMEDIA_FIXTURE";
+    out.write(kStub, sizeof(kStub) - 1);
+    out.close();
+}
 
 void testRationalTimebaseSanitization() {
     const auto zeroDen = openmedia::RationalTime::sanitize(1, 0);
@@ -51,11 +58,16 @@ void testInvalidPathsAndUninitializedCalls() {
     openmedia::CoreDemuxer demuxer;
     assert(!demuxer.isOpen());
     assert(!demuxer.isQuieted());
+    assert(!demuxer.resetFirstTimestamp());
+    assert(demuxer.lastError().empty());
+    assert(demuxer.diagnosticMessage().empty());
     assert(demuxer.getStreams().empty());
 
     assert(demuxer.openFile("") == openmedia::CoreStatus::InvalidArgument);
+    assert(!demuxer.lastError().empty());
     assert(demuxer.openFile("/nonexistent/openmedia_missing_fixture_12345.mkv") ==
            openmedia::CoreStatus::OpenFailed);
+    assert(!demuxer.lastError().empty());
     assert(!demuxer.isOpen());
 
     openmedia::EncodedPacket pkt;
@@ -133,6 +145,7 @@ void testQuietAndReopenLifecycle() {
     assert(demuxer.openFile(tempPath.string()) == openmedia::CoreStatus::Ok);
     assert(demuxer.isOpen());
     assert(!demuxer.isQuieted());
+    assert(demuxer.lastError().empty());
 
     const auto& streams = demuxer.getStreams();
     assert(streams.size() == 5);
@@ -165,12 +178,112 @@ void testQuietAndReopenLifecycle() {
     std::filesystem::remove(tempPath);
 }
 
+void testStartTimeNormalizationNonZeroStart() {
+    const auto tempPath =
+        std::filesystem::temp_directory_path() / "openmedia_test_nonzero_start.mkv";
+    writeDummyFixtureFile(tempPath);
+
+    openmedia::CoreDemuxer demuxer;
+    assert(demuxer.openFile(tempPath.string()) == openmedia::CoreStatus::Ok);
+
+    openmedia::EncodedPacket pkt0;
+    assert(demuxer.readNextPacket(pkt0) == openmedia::CoreStatus::Ok);
+    assert(pkt0.streamIndex == 0);
+    assert(pkt0.isKeyFrame);
+    assert(pkt0.pts == 0);
+    assert(pkt0.dts == 0);
+
+    openmedia::EncodedPacket pkt1;
+    assert(demuxer.readNextPacket(pkt1) == openmedia::CoreStatus::Ok);
+    assert(pkt1.pts == 1001);
+    assert(pkt1.dts == 1001);
+
+    openmedia::EncodedPacket eofPkt;
+    assert(demuxer.readNextPacket(eofPkt) == openmedia::CoreStatus::EndOfFile);
+
+    assert(demuxer.seekToTimestamp(0, 0) == openmedia::CoreStatus::Ok);
+    openmedia::EncodedPacket rewoundPkt;
+    assert(demuxer.readNextPacket(rewoundPkt) == openmedia::CoreStatus::Ok);
+    assert(rewoundPkt.pts == 0);
+
+    demuxer.close();
+    std::filesystem::remove(tempPath);
+}
+
+void testResetFirstTimestampOption() {
+    const auto tempPath =
+        std::filesystem::temp_directory_path() / "openmedia_test_raw_offset.mkv";
+    writeDummyFixtureFile(tempPath);
+
+    openmedia::CoreDemuxer demuxer;
+    demuxer.setResetFirstTimestamp(true);
+    assert(demuxer.resetFirstTimestamp());
+    assert(demuxer.openFile(tempPath.string()) == openmedia::CoreStatus::Ok);
+
+    openmedia::EncodedPacket pkt0;
+    assert(demuxer.readNextPacket(pkt0) == openmedia::CoreStatus::Ok);
+    assert(pkt0.pts == 0);
+    assert(pkt0.dts == 0);
+
+    openmedia::EncodedPacket pkt1;
+    assert(demuxer.readNextPacket(pkt1) == openmedia::CoreStatus::Ok);
+    assert(pkt1.pts == 1001);
+    assert(pkt1.dts == 1001);
+
+    demuxer.setResetFirstTimestamp(false);
+    assert(!demuxer.resetFirstTimestamp());
+    assert(demuxer.openFile(tempPath.string()) == openmedia::CoreStatus::Ok);
+    openmedia::EncodedPacket rawPkt;
+    assert(demuxer.readNextPacket(rawPkt) == openmedia::CoreStatus::Ok);
+    assert(rawPkt.pts == 4500);
+
+    demuxer.close();
+    std::filesystem::remove(tempPath);
+}
+
+void testEmptyVideoNoDecodableFrames() {
+    const auto tempPath =
+        std::filesystem::temp_directory_path() / "openmedia_test_empty_video.mkv";
+    writeDummyFixtureFile(tempPath);
+
+    openmedia::CoreDemuxer demuxer;
+    const auto status = demuxer.openFile(tempPath.string());
+    assert(status == openmedia::CoreStatus::NoDecodableFrames);
+    assert(demuxer.lastError() == "No decodable video frames in file");
+    assert(demuxer.diagnosticMessage() == "No decodable video frames in file");
+    assert(!demuxer.isOpen());
+    assert(demuxer.getStreams().empty());
+
+    assert(std::filesystem::remove(tempPath));
+    assert(!std::filesystem::exists(tempPath));
+}
+
+void testImmediateFileUnlockOnFatalAudioProbeFailure() {
+    const auto tempPath =
+        std::filesystem::temp_directory_path() / "openmedia_test_fatal_audio.mkv";
+    writeDummyFixtureFile(tempPath);
+
+    openmedia::CoreDemuxer demuxer;
+    const auto status = demuxer.openFile(tempPath.string());
+    assert(status == openmedia::CoreStatus::OpenFailed);
+    assert(!demuxer.lastError().empty());
+    assert(!demuxer.isOpen());
+    assert(demuxer.getStreams().empty());
+
+    assert(std::filesystem::remove(tempPath));
+    assert(!std::filesystem::exists(tempPath));
+}
+
 } // namespace
 
 int main() {
     testRationalTimebaseSanitization();
     testInvalidPathsAndUninitializedCalls();
     testQuietAndReopenLifecycle();
+    testStartTimeNormalizationNonZeroStart();
+    testResetFirstTimestampOption();
+    testEmptyVideoNoDecodableFrames();
+    testImmediateFileUnlockOnFatalAudioProbeFailure();
     std::cout << "[PASS] TC-1.2.1 CoreDemuxer unit tests passed.\n";
     return 0;
 }

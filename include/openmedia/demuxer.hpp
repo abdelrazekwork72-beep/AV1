@@ -14,7 +14,7 @@ namespace openmedia {
 
 /// @brief Thread-safe, Pimpl-isolated container demuxer implementing ICoreDemuxer.
 /// @details Wraps libavformat demuxing, stream discovery, rational timebase sanitization,
-///          keyframe-accurate seeking, and OS file-descriptor quieting/reopening.
+///          start-time normalization, keyframe-accurate seeking, and OS file-descriptor quieting/reopening.
 class CoreDemuxer final : public ICoreDemuxer {
 public:
     /// @brief Constructs an uninitialized CoreDemuxer instance.
@@ -37,7 +37,8 @@ public:
 
     /// @brief Opens a media container file and discovers all contained streams.
     /// @param path UTF-8 filesystem path to the input container file.
-    /// @return CoreStatus::Ok on success, InvalidArgument if path is empty, or OpenFailed on error.
+    /// @return CoreStatus::Ok on success, InvalidArgument if path is empty,
+    ///         NoDecodableFrames if a video stream has zero decodable frames, or OpenFailed on error.
     CoreStatus openFile(const std::string& path) override;
 
     /// @brief Releases OS file handles while preserving stream metadata for fast reopen.
@@ -55,16 +56,32 @@ public:
     /// @return Const reference to the internal vector of StreamInfo descriptors.
     const std::vector<StreamInfo>& getStreams() const override;
 
-    /// @brief Reads the next compressed packet from the container.
+    /// @brief Reads the next compressed packet from the container with normalized timestamps.
     /// @param outPacket Output packet populated with stream index, timestamps, flags, and payload.
     /// @return CoreStatus::Ok, EndOfFile, NotInitialized, or DecodeFailed.
     CoreStatus readNextPacket(EncodedPacket& outPacket) override;
 
     /// @brief Seeks to the nearest keyframe at or before timestampPts in the given stream.
     /// @param streamIndex Zero-based target stream index.
-    /// @param timestampPts Target presentation timestamp in the stream's timeBase units.
+    /// @param timestampPts Target presentation timestamp in normalized stream timeBase units.
     /// @return CoreStatus::Ok, NotInitialized, InvalidArgument, or SeekFailed.
     CoreStatus seekToTimestamp(int32_t streamIndex, int64_t timestampPts) override;
+
+    /// @brief Enables or disables resetting the first packet timestamp to PTS = 0 per stream.
+    /// @param enabled True to normalize from frame 0 even when container start_time <= 0.
+    void setResetFirstTimestamp(bool enabled) noexcept;
+
+    /// @brief Returns whether first-packet timestamp reset is enabled.
+    /// @return True if resetFirstTimestamp is enabled.
+    bool resetFirstTimestamp() const noexcept;
+
+    /// @brief Returns the last diagnostic error message recorded by this demuxer.
+    /// @return Const reference to the diagnostic message string (empty if no error).
+    const std::string& lastError() const noexcept;
+
+    /// @brief Alias for lastError() returning the diagnostic message string.
+    /// @return Const reference to the diagnostic message string.
+    const std::string& diagnosticMessage() const noexcept;
 
     /// @brief Checks whether a container is currently open (including while quieted).
     /// @return True if openFile() succeeded and close() has not been called.
