@@ -1,5 +1,5 @@
 /// @file importer_entry.cpp
-/// @brief Implementation of xImportEntry, static selector dispatch table, imInit, and imGetIndFormat.
+/// @brief Implementation of xOpenMediaImportEntry, xImportEntry, static dispatch table, and imInit.
 
 #include "importer/importer_entry.hpp"
 #include "importer/async_importer.hpp"
@@ -73,7 +73,10 @@ constexpr std::array<SelectorHandlerEntry, 7> kSelectorTable = {{
 
 } // namespace
 
-csSDK_int32 handleImInit(imStdParms* /*stdParms*/, void* param1, void* /*param2*/) {
+csSDK_int32 handleImInitWithPriority(imStdParms* /*stdParms*/,
+                                     void* param1,
+                                     void* /*param2*/,
+                                     bool isHighPriority) {
     if (param1 == nullptr) {
         return kImMemErr;
     }
@@ -81,10 +84,14 @@ csSDK_int32 handleImInit(imStdParms* /*stdParms*/, void* param1, void* /*param2*
     auto* info = static_cast<ImImportInfoRecExt*>(param1);
     info->canOpen = kPrTrueVal;
     info->hasSetup = kPrTrueVal;
-    info->priority = 100;
+    info->priority = isHighPriority ? kHighImporterPriority : kStandardImporterPriority;
     info->avoidAudioConform = kPrTrueVal;
     info->canProvidePeakAudio = kPrTrueVal;
     return kImNoErr;
+}
+
+csSDK_int32 handleImInit(imStdParms* stdParms, void* param1, void* param2) {
+    return handleImInitWithPriority(stdParms, param1, param2, false);
 }
 
 csSDK_int32 handleImGetIndFormat(imStdParms* /*stdParms*/, void* param1, void* param2) {
@@ -119,9 +126,25 @@ csSDK_int32 dispatchImporterSelector(csSDK_int32 selector,
 
 } // namespace openmedia::importer
 
+extern "C" DllExport PREMPLUGENTRY xOpenMediaImportEntry(csSDK_int32 selector,
+                                                          imStdParms* stdParms,
+                                                          void* param1,
+                                                          void* param2,
+                                                          bool isHighPriority) {
+    if (selector == openmedia::importer::kSelInit) {
+        return openmedia::importer::handleImInitWithPriority(stdParms, param1, param2, isHighPriority);
+    }
+    return openmedia::importer::dispatchImporterSelector(selector, stdParms, param1, param2);
+}
+
 extern "C" DllExport PREMPLUGENTRY xImportEntry(csSDK_int32 selector,
                                                 imStdParms* stdParms,
                                                 void* param1,
                                                 void* param2) {
-    return openmedia::importer::dispatchImporterSelector(selector, stdParms, param1, param2);
+#ifdef OPENMEDIA_IMPORTER_HIGH_PRIORITY
+    constexpr bool kHighPriority = true;
+#else
+    constexpr bool kHighPriority = false;
+#endif
+    return xOpenMediaImportEntry(selector, stdParms, param1, param2, kHighPriority);
 }
