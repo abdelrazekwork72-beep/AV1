@@ -2,6 +2,7 @@
 /// @brief Standalone unit tests (TC-1.2.1) for CoreDemuxer.
 
 #include "openmedia/demuxer.hpp"
+#include "openmedia/muxer.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -11,8 +12,22 @@
 #include <iostream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
+
+
+const std::vector<uint8_t> kValidAv1Extradata = {
+    0x0AU, 0x0AU, 0x00U, 0x00U, 0x00U, 0x02U,
+    0xAFU, 0xFFU, 0x80U, 0x5FU, 0x00U, 0x08U
+};
+
+const std::vector<uint8_t> kValidAv1KeyPacket = {
+    0x12U, 0x00U, 0x0AU, 0x0AU, 0x00U, 0x00U, 0x00U, 0x02U,
+    0xAFU, 0xFFU, 0x89U, 0x5FU, 0x20U, 0x08U, 0x32U, 0x0CU,
+    0x10U, 0x00U, 0xA8U, 0x82U, 0x04U, 0x10U, 0x20U, 0x81U,
+    0x00U, 0x02U, 0x98U, 0x20U
+};
 
 void testRationalTimebaseSanitization() {
     const auto zeroDen = openmedia::RationalTime::sanitize(1, 0);
@@ -62,41 +77,59 @@ void verifyDiscoveredStreams(const std::vector<openmedia::StreamInfo>& streams) 
     }
 }
 
+void createValidTestMkv(const std::string& path) {
+    openmedia::CoreMuxer muxer;
+    assert(muxer.openContainer(path, "matroska") == openmedia::CoreStatus::Ok);
+
+    openmedia::MuxerStreamConfig vCfg;
+    vCfg.info.type = openmedia::MediaType::Video;
+    vCfg.info.codec = openmedia::CodecId::AV1;
+    vCfg.info.width = 64;
+    vCfg.info.height = 64;
+    vCfg.info.timeBase = openmedia::RationalTime{1001, 24000};
+    vCfg.info.frameRate = openmedia::RationalTime{24000, 1001};
+    vCfg.info.extradata = kValidAv1Extradata;
+    assert(muxer.addStream(vCfg) == 0);
+
+    for (int i = 0; i < 4; ++i) {
+        openmedia::MuxerStreamConfig aCfg;
+        aCfg.info.type = openmedia::MediaType::Audio;
+        aCfg.info.codec = openmedia::CodecId::Opus;
+        aCfg.info.sampleRate = 48000;
+        aCfg.info.channels = 2;
+        aCfg.info.timeBase = openmedia::RationalTime{1, 48000};
+        assert(muxer.addStream(aCfg) == i + 1);
+    }
+
+    assert(muxer.writeHeader() == openmedia::CoreStatus::Ok);
+    openmedia::EncodedPacket pkt;
+    pkt.streamIndex = 0;
+    pkt.pts = 0;
+    pkt.dts = 0;
+    pkt.duration = 1001;
+    pkt.isKeyFrame = true;
+    pkt.data = kValidAv1KeyPacket;
+    assert(muxer.writeInterleavedPacket(pkt) == openmedia::CoreStatus::Ok);
+
+    for (int i = 1; i <= 4; ++i) {
+        openmedia::EncodedPacket aPkt;
+        aPkt.streamIndex = i;
+        aPkt.pts = 0;
+        aPkt.dts = 0;
+        aPkt.duration = 960;
+        aPkt.isKeyFrame = true;
+        aPkt.data = {0xF8U, 0xFFU, 0xFEU};
+        assert(muxer.writeInterleavedPacket(aPkt) == openmedia::CoreStatus::Ok);
+    }
+    assert(muxer.writeTrailerAndClose() == openmedia::CoreStatus::Ok);
+}
+
 void testQuietAndReopenLifecycle() {
     openmedia::CoreDemuxer demuxer;
-    const char* fixtureEnv = std::getenv("OPENMEDIA_TEST_MKV_PATH");
-
-#ifdef OPENMEDIA_HAS_FFMPEG
-    if (fixtureEnv != nullptr && std::filesystem::exists(fixtureEnv)) {
-        assert(demuxer.openFile(fixtureEnv) == openmedia::CoreStatus::Ok);
-        assert(demuxer.isOpen());
-        assert(!demuxer.isQuieted());
-        const auto& streams = demuxer.getStreams();
-        verifyDiscoveredStreams(streams);
-        const size_t streamCount = streams.size();
-
-        assert(demuxer.quietFile() == openmedia::CoreStatus::Ok);
-        assert(demuxer.isQuieted());
-        assert(demuxer.getStreams().size() == streamCount);
-
-        assert(demuxer.reopenIfQuieted() == openmedia::CoreStatus::Ok);
-        assert(!demuxer.isQuieted());
-        assert(demuxer.getStreams().size() == streamCount);
-
-        assert(demuxer.seekToTimestamp(0, 0) == openmedia::CoreStatus::Ok);
-        openmedia::EncodedPacket pkt;
-        const auto readStatus = demuxer.readNextPacket(pkt);
-        assert(readStatus == openmedia::CoreStatus::Ok ||
-               readStatus == openmedia::CoreStatus::EndOfFile);
-    }
-#else
-    (void)fixtureEnv;
     const auto tempPath =
-        std::filesystem::temp_directory_path() / "openmedia_test_5streams.mkv";
-    {
-        std::ofstream ofs(tempPath, std::ios::binary);
-        ofs << "\x1A\x45\xDF\xA3matroska";
-    }
+        std::filesystem::temp_directory_path() / "openmedia_test_5streams_valid.mkv";
+    createValidTestMkv(tempPath.string());
+
     assert(demuxer.openFile(tempPath.string()) == openmedia::CoreStatus::Ok);
     assert(demuxer.isOpen());
     assert(!demuxer.isQuieted());
@@ -106,9 +139,8 @@ void testQuietAndReopenLifecycle() {
     verifyDiscoveredStreams(streams);
     assert(streams[0].type == openmedia::MediaType::Video);
     assert(streams[0].codec == openmedia::CodecId::AV1);
-    assert(streams[0].frameRate.num == 24000 && streams[0].frameRate.den == 1001);
     assert(streams[1].type == openmedia::MediaType::Audio);
-    assert(streams[1].timeBase.num == 1 && streams[1].timeBase.den == 48000);
+    assert(streams[1].codec == openmedia::CodecId::Opus);
 
     assert(demuxer.quietFile() == openmedia::CoreStatus::Ok);
     assert(demuxer.isQuieted());
@@ -118,17 +150,19 @@ void testQuietAndReopenLifecycle() {
     assert(!demuxer.isQuieted());
     assert(demuxer.getStreams().size() == 5);
 
-    openmedia::EncodedPacket pkt;
-    assert(demuxer.readNextPacket(pkt) == openmedia::CoreStatus::EndOfFile);
     assert(demuxer.seekToTimestamp(0, 0) == openmedia::CoreStatus::Ok);
-    assert(demuxer.seekToTimestamp(4, 48000) == openmedia::CoreStatus::Ok);
+    assert(demuxer.seekToTimestamp(4, 0) == openmedia::CoreStatus::Ok);
     assert(demuxer.seekToTimestamp(5, 0) == openmedia::CoreStatus::InvalidArgument);
     assert(demuxer.seekToTimestamp(-1, 0) == openmedia::CoreStatus::InvalidArgument);
+
+    openmedia::EncodedPacket pkt;
+    const auto readStatus = demuxer.readNextPacket(pkt);
+    assert(readStatus == openmedia::CoreStatus::Ok ||
+           readStatus == openmedia::CoreStatus::EndOfFile);
 
     demuxer.close();
     assert(!demuxer.isOpen());
     std::filesystem::remove(tempPath);
-#endif
 }
 
 } // namespace

@@ -49,6 +49,17 @@ jobs:
       - name: Run Clean-Room License & GPL Contamination Audit
         run: python packaging/scripts/audit_licenses.py
 
+      - name: Install FFmpeg Development Libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq pkg-config libavcodec-dev libavformat-dev libswscale-dev libswresample-dev libavutil-dev
+
+      - name: Install FFmpeg Development Libraries (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install pkg-config ffmpeg
+
       - name: Configure CMake (Release)
         run: >
           cmake -S . -B build

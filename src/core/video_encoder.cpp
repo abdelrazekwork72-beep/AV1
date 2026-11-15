@@ -141,7 +141,7 @@ constexpr PixelFormatMapping kPixelFormatTable[] = {
     {PixelFormat::YUV444P,     AV_PIX_FMT_YUV444P,     3, 0, 1},
     {PixelFormat::YUV420P10LE, AV_PIX_FMT_YUV420P10LE, 3, 1, 2},
     {PixelFormat::YUV422P10LE, AV_PIX_FMT_YUV422P10LE, 3, 0, 2},
-    {PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV420P10LE, 3, 0, 2},
+    {PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV444P10LE, 3, 0, 2},
     {PixelFormat::YUV420P12LE, AV_PIX_FMT_YUV420P12LE, 3, 1, 2},
     {PixelFormat::YUV422P12LE, AV_PIX_FMT_YUV422P12LE, 3, 0, 2},
     {PixelFormat::YUV444P12LE, AV_PIX_FMT_YUV444P12LE, 3, 0, 2},
@@ -261,8 +261,7 @@ void configureRateControl(AVCodecContext* ctx, const VideoEncodeConfig& config, 
         return;
     }
     if (std::strcmp(encoderName, "libsvtav1") == 0) {
-        const int32_t baseQ = CoreVideoEncoder::normalizeCrfToBaseQIndex(clampedCrf);
-        const std::string svtParams = "qp=" + std::to_string(baseQ);
+        const std::string svtParams = "crf=" + std::to_string(clampedCrf);
         av_opt_set(ctx->priv_data, "svtav1-params", svtParams.c_str(), 0);
     }
     av_opt_set_int(ctx->priv_data, "crf", clampedCrf, 0);
@@ -331,6 +330,10 @@ CoreStatus prepareAVFrame(const RawVideoFrame& frame, AVFramePtr& outFrame) {
     avFrame->format = pixMap->avFmt;
     avFrame->pts = frame.pts;
     avFrame->duration = frame.duration;
+    if (frame.isKeyFrame) {
+        avFrame->flags |= AV_FRAME_FLAG_KEY;
+        avFrame->pict_type = AV_PICTURE_TYPE_I;
+    }
     avFrame->color_range = lookupColorRange(frame.colorRange);
     avFrame->colorspace = lookupColorSpace(frame.colorSpace);
     avFrame->color_trc = lookupColorTransfer(frame.colorTransfer);

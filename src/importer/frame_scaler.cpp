@@ -37,6 +37,7 @@ bool hasValidPlanes(const uint8_t* const planes[4],
     return planes[0] != nullptr && strides[0] > 0;
 }
 
+#ifndef OPENMEDIA_HAS_FFMPEG
 uint8_t clampByte(int32_t value) noexcept {
     if (value < 0) {
         return 0;
@@ -46,6 +47,7 @@ uint8_t clampByte(int32_t value) noexcept {
     }
     return static_cast<uint8_t>(value);
 }
+#endif
 
 #ifdef OPENMEDIA_HAS_FFMPEG
 

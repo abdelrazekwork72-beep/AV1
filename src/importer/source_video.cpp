@@ -1,4 +1,5 @@
 #include "importer/source_video.hpp"
+#include "importer/frame_scaler.hpp"
 
 #include <cstring>
 
@@ -114,6 +115,14 @@ csSDK_int32 allocateAndPopulatePPix(ImSourceVideoRecExt& rec,
         return kImUnsupported;
     }
 
+    if (frame.format != PixelFormat::BGRA8 && frame.format != PixelFormat::RGBA8) {
+        FrameScaler scaler;
+        if (scaler.scaleFrame(frame, reinterpret_cast<uint8_t*>(dstBuf), rowBytes,
+                              PixelFormat::BGRA8, frame.width, frame.height) == CoreStatus::Ok) {
+            *rec.outFrame = ppix;
+            return kImNoErr;
+        }
+    }
     copyFrameRows(frame, dstBuf, rowBytes, minRowBytes);
     *rec.outFrame = ppix;
     return kImNoErr;

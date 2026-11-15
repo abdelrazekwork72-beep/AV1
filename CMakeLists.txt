@@ -168,7 +168,7 @@ endif()
 
 openmedia_resolve_ffmpeg(OPENMEDIA_FFMPEG_FOUND OPENMEDIA_FFMPEG_LIBS OPENMEDIA_FFMPEG_INCS)
 if(OPENMEDIA_FFMPEG_FOUND)
-    target_compile_definitions(OpenMediaCore PRIVATE OPENMEDIA_HAS_FFMPEG=1)
+    target_compile_definitions(OpenMediaCore PUBLIC OPENMEDIA_HAS_FFMPEG=1)
     target_include_directories(OpenMediaCore PRIVATE ${OPENMEDIA_FFMPEG_INCS})
     target_link_libraries(OpenMediaCore PRIVATE ${OPENMEDIA_FFMPEG_LIBS})
 endif()

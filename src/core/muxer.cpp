@@ -198,7 +198,27 @@ bool configureStreamParameters(AVStream* stream, const StreamInfo& info) {
     return true;
 }
 
-bool copyExtradata(AVCodecParameters* codecpar, const std::vector<uint8_t>& extradata) {
+std::vector<uint8_t> buildDefaultOpusHead(int32_t channels, int32_t sampleRate) {
+    const uint8_t ch = static_cast<uint8_t>((channels > 0 && channels <= 255) ? channels : 2);
+    const uint32_t sr = static_cast<uint32_t>(sampleRate > 0 ? sampleRate : 48000);
+    return {
+        'O', 'p', 'u', 's', 'H', 'e', 'a', 'd',
+        0x01, ch,
+        0x38, 0x01, // pre-skip (312 samples LE)
+        static_cast<uint8_t>(sr & 0xFFU),
+        static_cast<uint8_t>((sr >> 8) & 0xFFU),
+        static_cast<uint8_t>((sr >> 16) & 0xFFU),
+        static_cast<uint8_t>((sr >> 24) & 0xFFU),
+        0x00, 0x00, // output gain
+        0x00        // channel mapping family 0
+    };
+}
+
+bool copyExtradata(AVCodecParameters* codecpar, const std::vector<uint8_t>& inExtradata) {
+    std::vector<uint8_t> extradata = inExtradata;
+    if (extradata.empty() && codecpar->codec_id == AV_CODEC_ID_OPUS) {
+        extradata = buildDefaultOpusHead(codecpar->ch_layout.nb_channels, codecpar->sample_rate);
+    }
     if (extradata.empty()) {
         return true;
     }
@@ -282,10 +302,23 @@ bool isSupportedSampleFormat(AVSampleFormat fmt) noexcept {
 }
 
 AVSampleFormat selectSampleFormat(const AVCodec* codec) noexcept {
-    if (!codec || !codec->sample_fmts) {
+    if (!codec) {
         return AV_SAMPLE_FMT_FLTP;
     }
-    for (const AVSampleFormat* p = codec->sample_fmts; *p != AV_SAMPLE_FMT_NONE; ++p) {
+    const AVSampleFormat* fmts = nullptr;
+#if LIBAVCODEC_VERSION_MAJOR >= 61
+    int numFmts = 0;
+    if (avcodec_get_supported_config(nullptr, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0,
+                                     reinterpret_cast<const void**>(&fmts), &numFmts) < 0 || !fmts) {
+        return AV_SAMPLE_FMT_FLTP;
+    }
+#else
+    fmts = codec->sample_fmts;
+    if (!fmts) {
+        return AV_SAMPLE_FMT_FLTP;
+    }
+#endif
+    for (const AVSampleFormat* p = fmts; *p != AV_SAMPLE_FMT_NONE; ++p) {
         if (isSupportedSampleFormat(*p)) {
             return *p;
         }

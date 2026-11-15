@@ -3,6 +3,7 @@
 
 #include "openmedia/demuxer.hpp"
 #include "openmedia/muxer.hpp"
+#include "openmedia/video_encoder.hpp"
 
 #include <cassert>
 #include <cstdio>
@@ -13,6 +14,25 @@
 namespace {
 
 using namespace openmedia;
+
+// Spec-compliant 64x64 8-bit AV1 Sequence Header OBU + Temporal Delimiter + Frame OBU
+const std::vector<uint8_t> kValidAv1Extradata = {
+    0x0AU, 0x0AU, 0x00U, 0x00U, 0x00U, 0x02U,
+    0xAFU, 0xFFU, 0x80U, 0x5FU, 0x00U, 0x08U
+};
+
+const std::vector<uint8_t> kValidAv1KeyPacket = {
+    0x12U, 0x00U, 0x0AU, 0x0AU, 0x00U, 0x00U, 0x00U, 0x02U,
+    0xAFU, 0xFFU, 0x89U, 0x5FU, 0x20U, 0x08U, 0x32U, 0x0CU,
+    0x10U, 0x00U, 0xA8U, 0x82U, 0x04U, 0x10U, 0x20U, 0x81U,
+    0x00U, 0x02U, 0x98U, 0x20U
+};
+
+const std::vector<uint8_t> kValidAv1InterPacket = {
+    0x12U, 0x00U, 0x32U, 0x10U, 0x30U, 0x02U, 0x04U, 0x09U,
+    0x24U, 0x92U, 0x23U, 0x00U, 0x00U, 0x00U, 0x02U, 0x00U,
+    0x00U, 0x00U, 0x94U, 0x40U
+};
 
 void verifyRoundTripDemuxer(const std::string& containerPath) {
     CoreDemuxer demuxer;
@@ -29,9 +49,10 @@ void testMuxerContainerAndStreamRegistration() {
     MuxerStreamConfig videoCfg;
     videoCfg.info.type = MediaType::Video;
     videoCfg.info.codec = CodecId::AV1;
-    videoCfg.info.width = 1920;
-    videoCfg.info.height = 1080;
+    videoCfg.info.width = 64;
+    videoCfg.info.height = 64;
     videoCfg.info.timeBase = RationalTime{1, 30};
+    videoCfg.info.extradata = kValidAv1Extradata;
 
     assert(muxer.addStream(videoCfg) == -1);
     assert(muxer.writeHeader() == CoreStatus::NotInitialized);
@@ -63,7 +84,7 @@ void testMuxerContainerAndStreamRegistration() {
     badStreamPkt.streamIndex = 99;
     badStreamPkt.pts = 0;
     badStreamPkt.dts = 0;
-    badStreamPkt.data = {0x01, 0x02};
+    badStreamPkt.data = kValidAv1KeyPacket;
     assert(muxer.writeInterleavedPacket(badStreamPkt) == CoreStatus::InvalidArgument);
 
     EncodedPacket pkt0;
@@ -72,7 +93,7 @@ void testMuxerContainerAndStreamRegistration() {
     pkt0.dts = 10;
     pkt0.duration = 1;
     pkt0.isKeyFrame = true;
-    pkt0.data = {0x12, 0x00, 0x0A};
+    pkt0.data = kValidAv1KeyPacket;
     assert(muxer.writeInterleavedPacket(pkt0) == CoreStatus::Ok);
 
     EncodedPacket regressedPkt = pkt0;
@@ -84,6 +105,7 @@ void testMuxerContainerAndStreamRegistration() {
     pkt1.pts = 11;
     pkt1.dts = 11;
     pkt1.isKeyFrame = false;
+    pkt1.data = kValidAv1InterPacket;
     assert(muxer.writeInterleavedPacket(pkt1) == CoreStatus::Ok);
 
     assert(muxer.writeTrailerAndClose() == CoreStatus::Ok);
