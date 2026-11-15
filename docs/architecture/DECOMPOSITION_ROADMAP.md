@@ -116,7 +116,7 @@ $$S_{\text{story}} = (0.35 \times D_1) + (0.25 \times D_2) + (0.20 \times D_3) +
 
 ---
 
-## 4. Complete 58-Unit Master Index & Disjoint File Ownership (Modules 1..5)
+## 4. Complete 57-Unit Master Index & Disjoint File Ownership (Modules 1..5)
 
 | Module | Story | Unit ID | Unit Branch | Primary Deliverable & Owned Production / Test Files |
 | :--- | :--- | :--- | :--- | :--- |
@@ -176,14 +176,13 @@ $$S_{\text{story}} = (0.35 \times D_1) + (0.25 \times D_2) + (0.20 \times D_3) +
 | **M5** | `US-5.1.0` | `unit-4` | `feat/us-5.1.0/unit-4-plugin-health-and-guide` | `include/desktop/plugin_health_guide.hpp`, `src/desktop/plugin_health_guide.cpp`, `tests/desktop/test_plugin_health_guide.cpp` |
 | **M5** | `US-5.2.0` | `unit-1` | `feat/us-5.2.0/unit-1-cache-and-log-manager` | `include/desktop/cache_log_manager.hpp`, `src/desktop/cache_log_manager.cpp`, `tests/desktop/test_cache_log_manager.cpp` |
 | **M5** | `US-5.2.0` | `unit-2` | `feat/us-5.2.0/unit-2-suffix-modifier-builder` | `include/desktop/suffix_modifier_builder.hpp`, `src/desktop/suffix_modifier_builder.cpp`, `tests/desktop/test_suffix_modifier_builder.cpp` |
-| **M5** | `US-5.2.0` | `unit-3` | `feat/us-5.2.0/unit-3-premiere-resolve-shortcut-converter` | `include/desktop/shortcut_converter.hpp`, `src/desktop/shortcut_converter.cpp`, `tests/desktop/test_shortcut_converter.cpp` |
-| **M5** | `US-5.2.0` | `unit-4` | `feat/us-5.2.0/unit-4-desktop-main-window-and-exe` | `include/desktop/desktop_main_window.hpp`, `src/desktop/desktop_main_window.cpp`, `src/desktop/main_desktop.cpp`, `tests/desktop/test_desktop_main_window.cpp` |
+| **M5** | `US-5.2.0` | `unit-3` | `feat/us-5.2.0/unit-3-desktop-main-window-and-exe` | `include/desktop/desktop_main_window.hpp`, `src/desktop/desktop_main_window.cpp`, `src/desktop/main_desktop.cpp`, `tests/desktop/test_desktop_main_window.cpp` |
 
 ---
 
 ## 5. Unified Repository Directory Architecture
 
-All 5 modules and 58 implementation units strictly adhere to a single unified directory layout and C++17 namespace hierarchy (`openmedia`, `openmedia::importer`, `openmedia::exporter`, `openmedia::qa`, `openmedia::desktop`):
+All 5 modules and 57 implementation units strictly adhere to a single unified directory layout and C++17 namespace hierarchy (`openmedia`, `openmedia::importer`, `openmedia::exporter`, `openmedia::qa`, `openmedia::desktop`):
 
 ```text
 AV1/
@@ -248,8 +247,7 @@ AV1/
 │       ├── plugin_health_guide.hpp              # US-5.1.0 unit-4 (MediaCore Health & User Guide)
 │       ├── cache_log_manager.hpp                # US-5.2.0 unit-1 (Thumbnail/Media Cache Purge & Log ZIP)
 │       ├── suffix_modifier_builder.hpp          # US-5.2.0 unit-2 (!options.influx Batch Builder)
-│       ├── shortcut_converter.hpp               # US-5.2.0 unit-3 (Premiere .kys <-> Resolve .txt)
-│       └── desktop_main_window.hpp              # US-5.2.0 unit-4 (Win32 Dark Studio GUI & Popup)
+│       └── desktop_main_window.hpp              # US-5.2.0 unit-3 (Win32 Dark Studio GUI & Popup)
 ├── src/
 │   ├── core/                                    # Module 1 implementation (.cpp)
 │   ├── importer/                                # Module 2 implementation (.cpp)
@@ -333,5 +331,5 @@ Following static PE/binary reverse engineering of **Autokroma Influx (`v1.7.1` &
 | **Module 2** | 30+ Formats & 13 `!options.influx` Modifiers (`src/importer/file_probe.cpp`) | Supports 30+ extensions (`360, 3gp, aac, ac3, aiff, apng, avi, bik, dts, flac, flv, gif, influx, mjpeg, mka, mkv, mov, mp3, mp4, mpg, mxf, ogg, ogv, opus, qoi, ts, m2ts, mts, vob, wav, webm, wma, wmv, y4m`) and reads 13 `!` modifiers after the **last** `!` | Expand `kSupportedFormats` to 30+ extensions, update `FilenameModifiers` to preserve `!` inside original filenames and parse all 13 tokens (`!w=`, `!h=`, `!vs=`, `!as=`, `!pf=`, `!fr=`, `!ar=`, `!sr=`, `!threads=`, `!cs=`, `!cr=`, `!accurate_duration`, `!rft=1`), and apply them directly to `StreamInfo` during `openAndProbe` / `populateFileInfo`. |
 | **Module 2** | Multi-Entry Thumbnail Cache, Timecode Overlay & RAM Eviction (`ppix_cache_bridge.cpp`, `memory_governor.cpp`) | Stores multiple thumbnails in SQLite3 with `DELETE FROM thumbnails; VACUUM;`, embeds `00:10:03:12` timecode overlay (`always_show`, `hide_when_zero`, `always_hide`), and evicts oldest open file sessions (`lu_file_storage_close_oldest_file`) | Upgrade `PPixCacheBridge` to append/lookup multiple thumbnail records with `clearAllThumbnails()` (`VACUUM`) and timecode bitmap overlay, and add LRU session eviction in `MemoryGovernor`. |
 | **Module 2 & 3** | Host Popup Integration (`imGetPrefs8` & `exSelSetup`) | Right-clicking a clip in Premiere Pro (`Source Settings…`) or After Effects (`Interpret Footage > More Options…`) launches `Influx.exe` with `"popup": "HostSettings"` | Wire `handleImGetPrefs8` in `importer_entry.cpp` and `PopupIpcBridge` in `exporter` to launch `OpenMediaDesktop.exe --popup --owner <HWND>`. |
-| **Module 5** | `OpenMediaDesktop.exe` (`src/desktop/`) | `Influx.exe` (`wxWidgets 3.2.8.1`) + `Premiere-to-Resolve shortcut report.txt` (`Aer.kys` $\to$ `DaVinci Resolve Keys.txt`) | Build `OpenMediaDesktop.exe` with bilingual **English (LTR) / Arabic (RTL)** Dark Studio UI, 16-key `Config.toml` editor, live `GPU Status` table, Thumbnail & Premiere Media Cache cleaners, Log ZIP exporter, `!options.influx` batch builder, and Premiere `.kys` $\leftrightarrow$ DaVinci Resolve `.txt` shortcut converter. |
+| **Module 5** | `OpenMediaDesktop.exe` (`src/desktop/`) | `Influx.exe` (`wxWidgets 3.2.8.1`) | Build `OpenMediaDesktop.exe` with bilingual **English (LTR) / Arabic (RTL)** Dark Studio UI, 16-key `Config.toml` editor, live `GPU Status` table, Thumbnail & Premiere Media Cache cleaners, Log ZIP exporter, `!options.influx` batch builder. |
 | **Module 4** | Packaging & QA (`openmedia_installer.nsi`, `tests/`) | NSIS installer packages `Influx.exe` + `.prm` shims + FFmpeg DLLs and supports silent CLI install `/S` and `-Uninstall_Influx` | Package `OpenMediaDesktop.exe` alongside `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`, and `Config.toml` with Start Menu/Desktop shortcuts and 60 CTest suites. |
