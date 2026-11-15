@@ -6,6 +6,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+include(CheckIPOSupported)
+check_ipo_supported(RESULT openmedia_ipo_supported OUTPUT openmedia_ipo_error)
+if(openmedia_ipo_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+    endif()
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
@@ -65,6 +74,7 @@ function(openmedia_configure_plugin_platform target_name)
             SUFFIX ".prm"
         )
         set(rc_OpenMedia_Importer "${CMAKE_CURRENT_SOURCE_DIR}/resources/importer_resources.rc")
+        set(rc_OpenMedia_ImporterHP "${CMAKE_CURRENT_SOURCE_DIR}/resources/importer_resources.rc")
         set(rc_OpenMedia_Exporter "${CMAKE_CURRENT_SOURCE_DIR}/resources/exporter_resources.rc")
         set(rc_file "${rc_${target_name}}")
         if(NOT EXISTS "${rc_file}")
@@ -81,6 +91,7 @@ function(openmedia_configure_plugin_platform target_name)
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.openmedia.premiere.${target_name}"
         )
         set(plist_OpenMedia_Importer "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info_Importer.plist.in")
+        set(plist_OpenMedia_ImporterHP "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info_Importer.plist.in")
         set(plist_OpenMedia_Exporter "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info_Exporter.plist.in")
         set(plist_in "${plist_${target_name}}")
         if(NOT EXISTS "${plist_in}")
@@ -102,6 +113,19 @@ function(openmedia_configure_plugin_platform target_name)
                 "$<TARGET_BUNDLE_CONTENT_DIR:${target_name}>/PkgInfo"
             COMMENT "Generating PkgInfo for ${target_name}"
         )
+    endif()
+endfunction()
+
+function(openmedia_link_plugin_dependencies target_name)
+    target_link_libraries("${target_name}" PRIVATE OpenMediaCore)
+    if(TARGET AdobeSDK::Headers)
+        target_link_libraries("${target_name}" PRIVATE AdobeSDK::Headers)
+    endif()
+    if(TARGET AdobeSDK::Utils)
+        target_link_libraries("${target_name}" PRIVATE AdobeSDK::Utils)
+    endif()
+    if(OPENMEDIA_FFMPEG_FOUND)
+        target_link_libraries("${target_name}" PRIVATE ${OPENMEDIA_FFMPEG_LIBS})
     endif()
 endfunction()
 
@@ -134,19 +158,12 @@ function(openmedia_add_plugin_target target_name source_subdir)
         target_link_libraries("${target_name}_obj" PUBLIC ${OPENMEDIA_FFMPEG_LIBS})
     endif()
     openmedia_apply_warnings("${target_name}_obj")
+    openmedia_apply_simd_and_security("${target_name}_obj")
 
     add_library("${target_name}" MODULE $<TARGET_OBJECTS:${target_name}_obj>)
-    target_link_libraries("${target_name}" PRIVATE OpenMediaCore)
-    if(TARGET AdobeSDK::Headers)
-        target_link_libraries("${target_name}" PRIVATE AdobeSDK::Headers)
-    endif()
-    if(TARGET AdobeSDK::Utils)
-        target_link_libraries("${target_name}" PRIVATE AdobeSDK::Utils)
-    endif()
-    if(OPENMEDIA_FFMPEG_FOUND)
-        target_link_libraries("${target_name}" PRIVATE ${OPENMEDIA_FFMPEG_LIBS})
-    endif()
+    openmedia_link_plugin_dependencies("${target_name}")
     openmedia_apply_warnings("${target_name}")
+    openmedia_apply_simd_and_security("${target_name}")
     openmedia_configure_plugin_platform("${target_name}")
 endfunction()
 
@@ -161,6 +178,7 @@ target_include_directories(OpenMediaCore PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
 openmedia_apply_warnings(OpenMediaCore)
+openmedia_apply_simd_and_security(OpenMediaCore)
 
 if(WIN32)
     set_target_properties(OpenMediaCore PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -174,6 +192,15 @@ if(OPENMEDIA_FFMPEG_FOUND)
 endif()
 
 openmedia_add_plugin_target(OpenMedia_Importer "importer")
+
+# Companion High-Priority Importer shim (isHighPriority = true / 0x01) sharing OpenMedia_Importer_obj.
+add_library(OpenMedia_ImporterHP MODULE $<TARGET_OBJECTS:OpenMedia_Importer_obj>)
+target_compile_definitions(OpenMedia_ImporterHP PRIVATE OPENMEDIA_HIGH_PRIORITY_SHIM=1)
+openmedia_link_plugin_dependencies(OpenMedia_ImporterHP)
+openmedia_apply_warnings(OpenMedia_ImporterHP)
+openmedia_apply_simd_and_security(OpenMedia_ImporterHP)
+openmedia_configure_plugin_platform(OpenMedia_ImporterHP)
+
 openmedia_add_plugin_target(OpenMedia_Exporter "exporter")
 
 enable_testing()
@@ -339,7 +366,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging/test_license_audit.py")
     endif()
 endif()
 
-install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_Exporter
+install(TARGETS OpenMediaCore OpenMedia_Importer OpenMedia_ImporterHP OpenMedia_Exporter
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .
     BUNDLE DESTINATION .
