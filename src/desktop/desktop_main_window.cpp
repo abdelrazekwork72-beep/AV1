@@ -149,7 +149,7 @@ void refreshLocalizedUi(Win32UiState* st) {
         TCITEMW item{};
         item.mask = TCIF_TEXT;
         item.pszText = label.data();
-        TabCtrl_SetItemW(st->tab, i, &item);
+        SendMessageW(st->tab, TCM_SETITEMW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&item));
     }
 
     const DesktopTab tab = st->owner->activeTab();
@@ -219,7 +219,7 @@ LRESULT CALLBACK DesktopWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 item.mask = TCIF_TEXT;
                 wchar_t buf[] = L"Tab";
                 item.pszText = buf;
-                TabCtrl_InsertItemW(st->tab, i, &item);
+                SendMessageW(st->tab, TCM_INSERTITEMW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&item));
             }
 
             st->policyCombo = CreateWindowExW(0, L"COMBOBOX", L"",
@@ -473,7 +473,7 @@ int DesktopMainWindow::run() {
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = DesktopWndProc;
     wc.hInstance = hInst;
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
     wc.lpszClassName = kClassName;
     RegisterClassExW(&wc);
 

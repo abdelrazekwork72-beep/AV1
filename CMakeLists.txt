@@ -249,6 +249,7 @@ target_include_directories(OpenMediaDesktopLib PUBLIC
 )
 target_link_libraries(OpenMediaDesktopLib PUBLIC OpenMedia_Importer_obj OpenMediaCore)
 if(WIN32)
+    target_compile_definitions(OpenMediaDesktopLib PUBLIC UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
     target_link_libraries(OpenMediaDesktopLib PUBLIC user32 gdi32 comctl32 shell32 comdlg32 ole32)
 endif()
 openmedia_apply_warnings(OpenMediaDesktopLib)
