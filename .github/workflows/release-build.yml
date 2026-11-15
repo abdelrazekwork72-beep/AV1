@@ -66,13 +66,13 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DADOBE_PP_SDK="${{ github.workspace }}/tests/mocks/mock_sdk"
 
-      - name: Build OpenMediaCore, Importer (.prm/.bundle), Exporter (.prm/.bundle) & Test Suite
+      - name: Build OpenMediaCore, Dual-PRM Importers (.prm/.bundle), Exporter (.prm/.bundle) & Test Suite
         run: cmake --build build --config Release --parallel
 
       - name: Run Full CTest Suite (Unit, Integration, Benchmarks & Packaging)
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: Package Windows MediaCore Plugin Bundle (.prm + .dll + PowerShell Installer)
+      - name: Package Windows MediaCore Plugin Bundle (Dual-PRM + Config.toml + VC++ Check)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -80,30 +80,43 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
           Copy-Item "build/bin/OpenMedia_Importer.prm" -Destination $stageDir -Force
+          Copy-Item "build/bin/OpenMedia_ImporterHP.prm" -Destination $stageDir -Force
           Copy-Item "build/bin/OpenMedia_Exporter.prm" -Destination $stageDir -Force
           Copy-Item "build/bin/OpenMediaCore.dll" -Destination $stageDir -Force
+          Copy-Item "packaging/Config.toml" -Destination $stageDir -Force
           Copy-Item "THIRD_PARTY_LICENSES.md" -Destination $stageDir -Force
           Copy-Item "README.md" -Destination $stageDir -Force
 
           $installScript = @'
           # Requires -RunAsAdministrator
           $ErrorActionPreference = "Stop"
+
+          $System32 = Join-Path $env:SystemRoot "System32"
+          $VcRuntime = Join-Path $System32 "VCRUNTIME140.dll"
+          $VcRuntime1 = Join-Path $System32 "VCRUNTIME140_1.dll"
+          if (-not (Test-Path $VcRuntime) -or -not (Test-Path $VcRuntime1)) {
+              Write-Error "Missing Microsoft Visual C++ 2015-2022 Redistributable (x64): VCRUNTIME140.dll or VCRUNTIME140_1.dll not found in $System32. Please download and install vc_redist.x64.exe from https://aka.ms/vs/17/release/vc_redist.x64.exe before installing OpenMedia plugins."
+              exit 1
+          }
+
           $TargetDir = "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore"
           if (-not (Test-Path $TargetDir)) {
               New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
           }
           Copy-Item "$PSScriptRoot\OpenMedia_Importer.prm" -Destination $TargetDir -Force
+          Copy-Item "$PSScriptRoot\OpenMedia_ImporterHP.prm" -Destination $TargetDir -Force
           Copy-Item "$PSScriptRoot\OpenMedia_Exporter.prm" -Destination $TargetDir -Force
           Copy-Item "$PSScriptRoot\OpenMediaCore.dll" -Destination $TargetDir -Force
+          Copy-Item "$PSScriptRoot\Config.toml" -Destination $TargetDir -Force
           Copy-Item "$PSScriptRoot\THIRD_PARTY_LICENSES.md" -Destination $TargetDir -Force
-          Write-Host "[OpenMedia] Installed OpenMedia_Importer.prm, OpenMedia_Exporter.prm, and OpenMediaCore.dll to $TargetDir" -ForegroundColor Green
+          Write-Host "[OpenMedia] Installed Dual-PRM Importers (OpenMedia_Importer.prm, OpenMedia_ImporterHP.prm), OpenMedia_Exporter.prm, OpenMediaCore.dll, and Config.toml to $TargetDir" -ForegroundColor Green
           '@
           Set-Content -Path "$stageDir/Install-MediaCore.ps1" -Value $installScript -Encoding UTF8
 
           Compress-Archive -Path "$stageDir/*" -DestinationPath "${{ matrix.archive_name }}" -Force
           Get-ChildItem "${{ matrix.archive_name }}"
 
-      - name: Package macOS MediaCore Plugin Bundle (.bundle + .dylib + Installer Script)
+      - name: Package macOS MediaCore Plugin Bundle (Dual-PRM + Config.toml + Installer Script)
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -111,8 +124,10 @@ jobs:
           mkdir -p "$STAGE_DIR"
 
           cp -R build/bin/OpenMedia_Importer.bundle "$STAGE_DIR/"
+          cp -R build/bin/OpenMedia_ImporterHP.bundle "$STAGE_DIR/"
           cp -R build/bin/OpenMedia_Exporter.bundle "$STAGE_DIR/"
           cp build/bin/libOpenMediaCore.dylib "$STAGE_DIR/"
+          cp packaging/Config.toml "$STAGE_DIR/"
           cp THIRD_PARTY_LICENSES.md "$STAGE_DIR/"
           cp README.md "$STAGE_DIR/"
 
@@ -123,18 +138,20 @@ jobs:
           sudo mkdir -p "$TARGET_DIR"
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
           sudo cp -R "$SCRIPT_DIR/OpenMedia_Importer.bundle" "$TARGET_DIR/"
+          sudo cp -R "$SCRIPT_DIR/OpenMedia_ImporterHP.bundle" "$TARGET_DIR/"
           sudo cp -R "$SCRIPT_DIR/OpenMedia_Exporter.bundle" "$TARGET_DIR/"
           sudo cp "$SCRIPT_DIR/libOpenMediaCore.dylib" "$TARGET_DIR/"
+          sudo cp "$SCRIPT_DIR/Config.toml" "$TARGET_DIR/"
           sudo cp "$SCRIPT_DIR/THIRD_PARTY_LICENSES.md" "$TARGET_DIR/"
-          sudo chmod -R 755 "$TARGET_DIR/OpenMedia_Importer.bundle" "$TARGET_DIR/OpenMedia_Exporter.bundle"
-          echo "[OpenMedia] Installed OpenMedia_Importer.bundle, OpenMedia_Exporter.bundle, and libOpenMediaCore.dylib to $TARGET_DIR"
+          sudo chmod -R 755 "$TARGET_DIR/OpenMedia_Importer.bundle" "$TARGET_DIR/OpenMedia_ImporterHP.bundle" "$TARGET_DIR/OpenMedia_Exporter.bundle"
+          echo "[OpenMedia] Installed Dual-PRM bundles, OpenMedia_Exporter.bundle, libOpenMediaCore.dylib, and Config.toml to $TargetDir"
           EOF
           chmod +x "$STAGE_DIR/install-mediacore.sh"
 
           (cd "$STAGE_DIR" && zip -r "${GITHUB_WORKSPACE}/${{ matrix.archive_name }}" .)
           ls -lh "${{ matrix.archive_name }}"
 
-      - name: Package Linux MediaCore Shared Libraries (.so + CPack TGZ)
+      - name: Package Linux MediaCore Shared Libraries (.so + Config.toml + CPack TGZ)
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -144,6 +161,7 @@ jobs:
           cp build/bin/libOpenMediaCore.so* "$STAGE_DIR/" 2>/dev/null || true
           cp build/bin/*OpenMedia_Importer* "$STAGE_DIR/" 2>/dev/null || true
           cp build/bin/*OpenMedia_Exporter* "$STAGE_DIR/" 2>/dev/null || true
+          cp packaging/Config.toml "$STAGE_DIR/"
           cp THIRD_PARTY_LICENSES.md "$STAGE_DIR/"
           cp README.md "$STAGE_DIR/"
 
@@ -201,18 +219,22 @@ jobs:
             release-assets/SHA256SUMS.txt
           body: |
             ## OpenMedia Premiere Pro & Adobe Media Encoder Plugin (`${{ steps.tag.outputs.tag_name }}`)
-            Native **MKV / WebM / Ogg** Importer (`VP9`, `AV1`, `Opus`, `Vorbis`, `FLAC`) and **AV1 / VP9** Exporter (`SVT-AV1`, `libaom-av1`, `libvpx-vp9`, `NVENC`, `AMF`, `QSV`) for Adobe Premiere Pro & Adobe Media Encoder.
+            Native **MKV / WebM / Ogg** Dual-PRM Importer (`VP9`, `AV1`, `Opus`, `Vorbis`, `FLAC`) and **AV1 / VP9** Exporter (`SVT-AV1`, `libaom-av1`, `libvpx-vp9`, `NVENC`, `AMF`, `QSV`) for Adobe Premiere Pro & Adobe Media Encoder.
 
             ### Included Binaries
             - **Windows x64 (`OpenMedia-PremierePlugin-v1.0.0-Windows-x64.zip`)**:
-              - `OpenMedia_Importer.prm` (`xImportEntry`)
+              - `OpenMedia_Importer.prm` (Normal priority `0x00`, `xImportEntry`)
+              - `OpenMedia_ImporterHP.prm` (High priority `0x01`, `xImportEntry`)
               - `OpenMedia_Exporter.prm` (`xSDKExport`)
               - `OpenMediaCore.dll`
-              - `Install-MediaCore.ps1` (One-click installer to `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`)
+              - `Config.toml` (Dual-PRM & CPU/GPU decode policy configuration)
+              - `Install-MediaCore.ps1` (One-click installer with VC++ Redistributable check to `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`)
               - `THIRD_PARTY_LICENSES.md`
             - **macOS (`OpenMedia-PremierePlugin-v1.0.0-macOS.zip`)**:
               - `OpenMedia_Importer.bundle`
+              - `OpenMedia_ImporterHP.bundle`
               - `OpenMedia_Exporter.bundle`
               - `libOpenMediaCore.dylib`
+              - `Config.toml`
               - `install-mediacore.sh` (Installer script to `/Library/Application Support/Adobe/Common/Plug-ins/7.0/MediaCore`)
               - `THIRD_PARTY_LICENSES.md`

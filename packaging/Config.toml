@@ -1,0 +1,26 @@
+# OpenMedia Premiere Pro & Adobe Media Encoder Plugin Configuration (Influx-v2)
+# Installed alongside OpenMedia_Importer.prm, OpenMedia_ImporterHP.prm, and OpenMedia_Exporter.prm.
+
+[dual_prm]
+# Enable Dual-PRM priority routing:
+#   - OpenMedia_Importer.prm   (Normal priority 0x00, PiPL "OpenMedia Importer")
+#   - OpenMedia_ImporterHP.prm (High priority   0x01, PiPL "OpenMedia Importer ")
+enabled = true
+normal_priority = 100
+high_priority = 255
+
+[decode_policy]
+# Clips < 2560x1600 route to CPU decode; clips >= 2560x1600 route to GPU (NVDEC/D3D11VA/VideoToolbox)
+# up to max_gpu_streams concurrent streams, after which additional streams auto-route to CPU.
+gpu_min_width = 2560
+gpu_min_height = 1600
+max_gpu_streams = 4
+overflow_to_cpu = true
+
+[performance]
+# GOP RingBuffer lookahead & 16-byte SIMD alignment
+gop_ring_buffer_frames = 32
+retain_final_frame = true
+
+[logging]
+level = "info"
