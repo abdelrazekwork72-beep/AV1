@@ -26,24 +26,25 @@ namespace {
 struct PixelFormatGeometry {
     PixelFormat coreFmt;
     int32_t planes;
+    int32_t chromaShiftX;
     int32_t chromaShiftY;
     int32_t bytesPerSample;
 };
 
 constexpr PixelFormatGeometry kFormatGeometryTable[] = {
-    {PixelFormat::YUV420P,     3, 1, 1},
-    {PixelFormat::YUV422P,     3, 0, 1},
-    {PixelFormat::YUV444P,     3, 0, 1},
-    {PixelFormat::YUV420P10LE, 3, 1, 2},
-    {PixelFormat::YUV422P10LE, 3, 0, 2},
-    {PixelFormat::YUV444P10LE, 3, 0, 2},
-    {PixelFormat::YUV420P12LE, 3, 1, 2},
-    {PixelFormat::YUV422P12LE, 3, 0, 2},
-    {PixelFormat::YUV444P12LE, 3, 0, 2},
-    {PixelFormat::NV12,        2, 1, 1},
-    {PixelFormat::P010LE,      2, 1, 2},
-    {PixelFormat::BGRA8,       1, 0, 4},
-    {PixelFormat::RGBA8,       1, 0, 4},
+    {PixelFormat::YUV420P,     3, 1, 1, 1},
+    {PixelFormat::YUV422P,     3, 1, 0, 1},
+    {PixelFormat::YUV444P,     3, 0, 0, 1},
+    {PixelFormat::YUV420P10LE, 3, 1, 1, 2},
+    {PixelFormat::YUV422P10LE, 3, 1, 0, 2},
+    {PixelFormat::YUV444P10LE, 3, 0, 0, 2},
+    {PixelFormat::YUV420P12LE, 3, 1, 1, 2},
+    {PixelFormat::YUV422P12LE, 3, 1, 0, 2},
+    {PixelFormat::YUV444P12LE, 3, 0, 0, 2},
+    {PixelFormat::NV12,        2, 1, 1, 1},
+    {PixelFormat::P010LE,      2, 1, 1, 2},
+    {PixelFormat::BGRA8,       1, 0, 0, 4},
+    {PixelFormat::RGBA8,       1, 0, 0, 4},
 };
 
 const PixelFormatGeometry* findFormatGeometry(PixelFormat fmt) noexcept {
@@ -131,24 +132,25 @@ struct PixelFormatMapping {
     PixelFormat coreFmt;
     AVPixelFormat avFmt;
     int32_t planes;
+    int32_t chromaShiftX;
     int32_t chromaShiftY;
     int32_t bytesPerSample;
 };
 
 constexpr PixelFormatMapping kPixelFormatTable[] = {
-    {PixelFormat::YUV420P,     AV_PIX_FMT_YUV420P,     3, 1, 1},
-    {PixelFormat::YUV422P,     AV_PIX_FMT_YUV422P,     3, 0, 1},
-    {PixelFormat::YUV444P,     AV_PIX_FMT_YUV444P,     3, 0, 1},
-    {PixelFormat::YUV420P10LE, AV_PIX_FMT_YUV420P10LE, 3, 1, 2},
-    {PixelFormat::YUV422P10LE, AV_PIX_FMT_YUV422P10LE, 3, 0, 2},
-    {PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV444P10LE, 3, 0, 2},
-    {PixelFormat::YUV420P12LE, AV_PIX_FMT_YUV420P12LE, 3, 1, 2},
-    {PixelFormat::YUV422P12LE, AV_PIX_FMT_YUV422P12LE, 3, 0, 2},
-    {PixelFormat::YUV444P12LE, AV_PIX_FMT_YUV444P12LE, 3, 0, 2},
-    {PixelFormat::NV12,        AV_PIX_FMT_NV12,        2, 1, 1},
-    {PixelFormat::P010LE,      AV_PIX_FMT_P010LE,      2, 1, 2},
-    {PixelFormat::BGRA8,       AV_PIX_FMT_BGRA,        1, 0, 4},
-    {PixelFormat::RGBA8,       AV_PIX_FMT_RGBA,        1, 0, 4},
+    {PixelFormat::YUV420P,     AV_PIX_FMT_YUV420P,     3, 1, 1, 1},
+    {PixelFormat::YUV422P,     AV_PIX_FMT_YUV422P,     3, 1, 0, 1},
+    {PixelFormat::YUV444P,     AV_PIX_FMT_YUV444P,     3, 0, 0, 1},
+    {PixelFormat::YUV420P10LE, AV_PIX_FMT_YUV420P10LE, 3, 1, 1, 2},
+    {PixelFormat::YUV422P10LE, AV_PIX_FMT_YUV422P10LE, 3, 1, 0, 2},
+    {PixelFormat::YUV444P10LE, AV_PIX_FMT_YUV444P10LE, 3, 0, 0, 2},
+    {PixelFormat::YUV420P12LE, AV_PIX_FMT_YUV420P12LE, 3, 1, 1, 2},
+    {PixelFormat::YUV422P12LE, AV_PIX_FMT_YUV422P12LE, 3, 1, 0, 2},
+    {PixelFormat::YUV444P12LE, AV_PIX_FMT_YUV444P12LE, 3, 0, 0, 2},
+    {PixelFormat::NV12,        AV_PIX_FMT_NV12,        2, 1, 1, 1},
+    {PixelFormat::P010LE,      AV_PIX_FMT_P010LE,      2, 1, 1, 2},
+    {PixelFormat::BGRA8,       AV_PIX_FMT_BGRA,        1, 0, 0, 4},
+    {PixelFormat::RGBA8,       AV_PIX_FMT_RGBA,        1, 0, 0, 4},
 };
 
 struct ColorRangeMapping {
@@ -188,6 +190,27 @@ constexpr ColorTransferMapping kColorTransferTable[] = {
     {ColorTransfer::sRGB,        AVCOL_TRC_IEC61966_2_1},
 };
 
+enum class RateControlKind {
+    NvencAv1,
+    VpxVp9,
+    SvtAv1,
+    Generic,
+};
+
+struct EncoderCandidate {
+    CodecId codec;
+    bool isHardware;
+    const char* name;
+    RateControlKind rcKind;
+};
+
+constexpr EncoderCandidate kEncoderCandidates[] = {
+    {CodecId::AV1, true,  "av1_nvenc",  RateControlKind::NvencAv1},
+    {CodecId::AV1, false, "libsvtav1",  RateControlKind::SvtAv1},
+    {CodecId::AV1, false, "libaom-av1", RateControlKind::Generic},
+    {CodecId::VP9, false, "libvpx-vp9", RateControlKind::VpxVp9},
+};
+
 const PixelFormatMapping* findPixelFormatMapping(PixelFormat fmt) noexcept {
     for (const auto& entry : kPixelFormatTable) {
         if (entry.coreFmt == fmt) {
@@ -224,48 +247,97 @@ AVColorTransferCharacteristic lookupColorTransfer(ColorTransfer trc) noexcept {
     return AVCOL_TRC_UNSPECIFIED;
 }
 
-const AVCodec* selectEncoder(CodecId codec, bool preferHardware, const char*& outName) noexcept {
-    if (codec == CodecId::VP9) {
-        outName = "libvpx-vp9";
-        return avcodec_find_encoder_by_name(outName);
-    }
-    if (codec != CodecId::AV1) {
-        outName = nullptr;
-        return nullptr;
-    }
-    if (preferHardware) {
-        if (const AVCodec* nvenc = avcodec_find_encoder_by_name("av1_nvenc")) {
-            outName = "av1_nvenc";
-            return nvenc;
+void configureCrfRateControl(AVCodecContext* ctx, const VideoEncodeConfig& config,
+                             RateControlKind rcKind) noexcept {
+    const int32_t clampedCrf = std::clamp(config.crf, 0, 63);
+    switch (rcKind) {
+        case RateControlKind::NvencAv1:
+            av_opt_set(ctx->priv_data, "rc", "vbr", 0);
+            av_opt_set_int(ctx->priv_data, "cq", CoreVideoEncoder::normalizeCrfToVp9Cq(clampedCrf), 0);
+            return;
+        case RateControlKind::VpxVp9:
+            ctx->bit_rate = 0;
+            av_opt_set_int(ctx->priv_data, "crf", clampedCrf, 0);
+            av_opt_set_int(ctx->priv_data, "cpu-used", std::clamp(config.preset, 0, 8), 0);
+            return;
+        case RateControlKind::SvtAv1: {
+            const std::string svtParams = "crf=" + std::to_string(clampedCrf);
+            av_opt_set(ctx->priv_data, "svtav1-params", svtParams.c_str(), 0);
+            av_opt_set_int(ctx->priv_data, "crf", clampedCrf, 0);
+            av_opt_set_int(ctx->priv_data, "preset", std::clamp(config.preset, 0, 13), 0);
+            return;
         }
+        case RateControlKind::Generic:
+        default:
+            av_opt_set_int(ctx->priv_data, "crf", clampedCrf, 0);
+            av_opt_set_int(ctx->priv_data, "preset", std::clamp(config.preset, 0, 13), 0);
+            return;
     }
-    outName = "libsvtav1";
-    return avcodec_find_encoder_by_name(outName);
 }
 
-void configureRateControl(AVCodecContext* ctx, const VideoEncodeConfig& config, const char* encoderName) noexcept {
+void configureRateControl(AVCodecContext* ctx, const VideoEncodeConfig& config,
+                          RateControlKind rcKind) noexcept {
     if (config.bitrateBps > 0) {
         ctx->bit_rate = config.bitrateBps;
         return;
     }
-    const int32_t clampedCrf = std::clamp(config.crf, 0, 63);
-    if (std::strcmp(encoderName, "av1_nvenc") == 0) {
-        av_opt_set(ctx->priv_data, "rc", "vbr", 0);
-        av_opt_set_int(ctx->priv_data, "cq", CoreVideoEncoder::normalizeCrfToVp9Cq(clampedCrf), 0);
-        return;
+    configureCrfRateControl(ctx, config, rcKind);
+}
+
+bool isCandidateEligible(const EncoderCandidate& cand, const VideoEncodeConfig& config) noexcept {
+    return cand.codec == config.codec && (!cand.isHardware || config.preferHardware);
+}
+
+bool tryOpenCandidate(const EncoderCandidate& cand, const VideoEncodeConfig& config,
+                      const PixelFormatMapping& pixMap, AVCodecCtxPtr& outCtx,
+                      bool& foundCodec) {
+    const AVCodec* codec = avcodec_find_encoder_by_name(cand.name);
+    if (codec == nullptr) {
+        return false;
     }
-    if (std::strcmp(encoderName, "libvpx-vp9") == 0) {
-        ctx->bit_rate = 0;
-        av_opt_set_int(ctx->priv_data, "crf", clampedCrf, 0);
-        av_opt_set_int(ctx->priv_data, "cpu-used", std::clamp(config.preset, 0, 8), 0);
-        return;
+    foundCodec = true;
+
+    AVCodecCtxPtr ctx(avcodec_alloc_context3(codec));
+    if (!ctx) {
+        return false;
     }
-    if (std::strcmp(encoderName, "libsvtav1") == 0) {
-        const std::string svtParams = "crf=" + std::to_string(clampedCrf);
-        av_opt_set(ctx->priv_data, "svtav1-params", svtParams.c_str(), 0);
+
+    const RationalTime safeTimeBase = RationalTime::sanitize(config.timeBase.num, config.timeBase.den);
+    const RationalTime safeFrameRate = RationalTime::sanitize(config.frameRate.num, config.frameRate.den);
+
+    ctx->width = config.width;
+    ctx->height = config.height;
+    ctx->pix_fmt = pixMap.avFmt;
+    ctx->time_base = AVRational{static_cast<int>(safeTimeBase.num), static_cast<int>(safeTimeBase.den)};
+    ctx->framerate = AVRational{static_cast<int>(safeFrameRate.num), static_cast<int>(safeFrameRate.den)};
+    ctx->gop_size = config.gopSize;
+    ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+    configureRateControl(ctx.get(), config, cand.rcKind);
+
+    if (avcodec_open2(ctx.get(), codec, nullptr) < 0) {
+        return false;
     }
-    av_opt_set_int(ctx->priv_data, "crf", clampedCrf, 0);
-    av_opt_set_int(ctx->priv_data, "preset", std::clamp(config.preset, 0, 13), 0);
+
+    outCtx = std::move(ctx);
+    return true;
+}
+
+CoreStatus openCodecWithFallback(const VideoEncodeConfig& config, AVCodecCtxPtr& outCtx) {
+    const PixelFormatMapping* pixMap = findPixelFormatMapping(config.pixelFormat);
+    if (pixMap == nullptr) {
+        return CoreStatus::InvalidArgument;
+    }
+
+    bool foundAnyCodec = false;
+    for (const auto& cand : kEncoderCandidates) {
+        if (isCandidateEligible(cand, config) &&
+            tryOpenCandidate(cand, config, *pixMap, outCtx, foundAnyCodec)) {
+            return CoreStatus::Ok;
+        }
+    }
+
+    return foundAnyCodec ? CoreStatus::OpenFailed : CoreStatus::UnsupportedCodec;
 }
 
 void copyPlaneRows(const uint8_t* src, uint32_t srcStride, uint8_t* dst,
@@ -290,24 +362,17 @@ bool isValidSourcePlane(const RawVideoFrame& src, int32_t planeIdx,
     return src.planes[planeIdx].size() >= requiredBytes;
 }
 
-bool validateAndCopyPlanes(const RawVideoFrame& src, const PixelFormatMapping& map,
-                           int32_t chromaShiftX, AVFrame* dst) noexcept {
+CoreStatus copyFramePlanes(const RawVideoFrame& src, const PixelFormatMapping& map, AVFrame* dst) noexcept {
     for (int32_t p = 0; p < map.planes; ++p) {
-        const int rows = (p == 0) ? src.height : ((src.height + (1 << map.chromaShiftY) - 1) >> map.chromaShiftY);
+        const int rows = (p == 0)
+            ? src.height
+            : ((src.height + (1 << map.chromaShiftY) - 1) >> map.chromaShiftY);
         const uint32_t widthBytes =
-            computePlaneWidthBytes(src.width, p, chromaShiftX, map.planes, map.bytesPerSample);
+            computePlaneWidthBytes(src.width, p, map.chromaShiftX, map.planes, map.bytesPerSample);
         if (!isValidSourcePlane(src, p, dst, rows, widthBytes)) {
-            return false;
+            return CoreStatus::InvalidArgument;
         }
         copyPlaneRows(src.planes[p].data(), src.rowBytes[p], dst->data[p], dst->linesize[p], rows, widthBytes);
-    }
-    return true;
-}
-
-CoreStatus copyFramePlanes(const RawVideoFrame& src, const PixelFormatMapping& map, AVFrame* dst) noexcept {
-    const int32_t chromaShiftX = (map.coreFmt == PixelFormat::YUV444P || map.coreFmt == PixelFormat::YUV444P10LE || map.coreFmt == PixelFormat::YUV444P12LE || map.planes == 1) ? 0 : 1;
-    if (!validateAndCopyPlanes(src, map, chromaShiftX, dst)) {
-        return CoreStatus::InvalidArgument;
     }
     return CoreStatus::Ok;
 }
@@ -319,16 +384,11 @@ std::vector<uint8_t> copyCodecExtradata(const AVCodecContext* ctx) {
     return std::vector<uint8_t>(ctx->extradata, ctx->extradata + ctx->extradata_size);
 }
 
-CoreStatus prepareAVFrame(const RawVideoFrame& frame, AVFramePtr& outFrame) {
-    const PixelFormatMapping* pixMap = findPixelFormatMapping(frame.format);
-    AVFramePtr avFrame(av_frame_alloc());
-    if (pixMap == nullptr || !avFrame) {
-        return CoreStatus::EncodeFailed;
-    }
+void populateAVFrameMetadata(const RawVideoFrame& frame, AVPixelFormat avFmt, AVFrame* avFrame) noexcept {
     avFrame->width = frame.width;
     avFrame->height = frame.height;
-    avFrame->format = pixMap->avFmt;
-    avFrame->pts = frame.pts;
+    avFrame->format = avFmt;
+    avFrame->pts = CoreVideoEncoder::normalizePts(frame.pts);
     avFrame->duration = frame.duration;
     if (frame.isKeyFrame) {
         avFrame->flags |= AV_FRAME_FLAG_KEY;
@@ -337,6 +397,15 @@ CoreStatus prepareAVFrame(const RawVideoFrame& frame, AVFramePtr& outFrame) {
     avFrame->color_range = lookupColorRange(frame.colorRange);
     avFrame->colorspace = lookupColorSpace(frame.colorSpace);
     avFrame->color_trc = lookupColorTransfer(frame.colorTransfer);
+}
+
+CoreStatus prepareAVFrame(const RawVideoFrame& frame, AVFramePtr& outFrame) {
+    const PixelFormatMapping* pixMap = findPixelFormatMapping(frame.format);
+    AVFramePtr avFrame(av_frame_alloc());
+    if (pixMap == nullptr || !avFrame) {
+        return CoreStatus::EncodeFailed;
+    }
+    populateAVFrameMetadata(frame, pixMap->avFmt, avFrame.get());
 
     if (av_frame_get_buffer(avFrame.get(), 16) < 0 || av_frame_make_writable(avFrame.get()) < 0) {
         return CoreStatus::EncodeFailed;
@@ -347,6 +416,17 @@ CoreStatus prepareAVFrame(const RawVideoFrame& frame, AVFramePtr& outFrame) {
     }
     outFrame = std::move(avFrame);
     return CoreStatus::Ok;
+}
+
+EncodedPacket convertAVPacket(const AVPacket* pkt) {
+    EncodedPacket outPkt;
+    outPkt.streamIndex = pkt->stream_index;
+    outPkt.pts = (pkt->pts != AV_NOPTS_VALUE) ? pkt->pts : 0;
+    outPkt.dts = (pkt->dts != AV_NOPTS_VALUE) ? pkt->dts : outPkt.pts;
+    outPkt.duration = pkt->duration;
+    outPkt.isKeyFrame = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
+    outPkt.data.assign(pkt->data, pkt->data + pkt->size);
+    return outPkt;
 }
 
 CoreStatus drainPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& outPackets) {
@@ -362,27 +442,12 @@ CoreStatus drainPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& outPack
         if (ret < 0) {
             return CoreStatus::EncodeFailed;
         }
-        EncodedPacket outPkt;
-        outPkt.streamIndex = pkt->stream_index;
-        outPkt.pts = pkt->pts;
-        outPkt.dts = pkt->dts;
-        outPkt.duration = pkt->duration;
-        outPkt.isKeyFrame = (pkt->flags & AV_PKT_FLAG_KEY) != 0;
-        outPkt.data.assign(pkt->data, pkt->data + pkt->size);
-        outPackets.push_back(std::move(outPkt));
+        outPackets.push_back(convertAVPacket(pkt.get()));
         av_packet_unref(pkt.get());
     }
 }
 
 #else
-
-int32_t computeFallbackChromaShiftX(const PixelFormatGeometry& geom) noexcept {
-    if (geom.coreFmt == PixelFormat::YUV444P || geom.coreFmt == PixelFormat::YUV444P10LE ||
-        geom.coreFmt == PixelFormat::YUV444P12LE || geom.planes == 1) {
-        return 0;
-    }
-    return 1;
-}
 
 bool isValidFallbackPlane(const RawVideoFrame& src, int32_t planeIdx,
                           int32_t rows, uint32_t widthBytes) noexcept {
@@ -394,13 +459,12 @@ bool isValidFallbackPlane(const RawVideoFrame& src, int32_t planeIdx,
 }
 
 CoreStatus validateFallbackPlanes(const RawVideoFrame& src, const PixelFormatGeometry& geom) noexcept {
-    const int32_t chromaShiftX = computeFallbackChromaShiftX(geom);
     for (int32_t p = 0; p < geom.planes; ++p) {
         const int32_t rows = (p == 0)
             ? src.height
             : ((src.height + (1 << geom.chromaShiftY) - 1) >> geom.chromaShiftY);
         const uint32_t widthBytes =
-            computePlaneWidthBytes(src.width, p, chromaShiftX, geom.planes, geom.bytesPerSample);
+            computePlaneWidthBytes(src.width, p, geom.chromaShiftX, geom.planes, geom.bytesPerSample);
         if (!isValidFallbackPlane(src, p, rows, widthBytes)) {
             return CoreStatus::InvalidArgument;
         }
@@ -413,10 +477,11 @@ EncodedPacket buildFallbackVideoPacket(const RawVideoFrame& frame,
                                        int64_t frameIndex) {
     const int32_t gop = (config.gopSize > 0) ? config.gopSize : 1;
     const int32_t qIdx = CoreVideoEncoder::normalizeCrfToBaseQIndex(config.crf);
+    const int64_t normalizedPts = CoreVideoEncoder::normalizePts(frame.pts);
     EncodedPacket pkt;
     pkt.streamIndex = 0;
-    pkt.pts = frame.pts;
-    pkt.dts = frame.pts;
+    pkt.pts = normalizedPts;
+    pkt.dts = normalizedPts;
     pkt.duration = (frame.duration > 0) ? frame.duration : 1;
     pkt.isKeyFrame = (frameIndex == 0) || (frameIndex % gop == 0);
     const uint8_t lumaSample = frame.planes[0].empty() ? 0U : frame.planes[0][0];
@@ -427,6 +492,16 @@ EncodedPacket buildFallbackVideoPacket(const RawVideoFrame& frame,
         static_cast<uint8_t>(frameIndex & 0xFF),
     };
     return pkt;
+}
+
+void enqueueDelayedPacket(std::deque<EncodedPacket>& delayedPackets,
+                          EncodedPacket&& pkt,
+                          std::vector<EncodedPacket>& outPackets) {
+    delayedPackets.push_back(std::move(pkt));
+    if (delayedPackets.size() > 1U) {
+        outPackets.push_back(std::move(delayedPackets.front()));
+        delayedPackets.pop_front();
+    }
 }
 
 #endif
@@ -450,6 +525,9 @@ struct CoreVideoEncoder::Impl {
     CoreStatus encodeFrameBackend(const RawVideoFrame& frame, std::vector<EncodedPacket>& outPackets) {
         if (!codecCtx) {
             return CoreStatus::NotInitialized;
+        }
+        if (flushed) {
+            return CoreStatus::EncodeFailed;
         }
         if (!matchesEncoderConfig(frame, config)) {
             return CoreStatus::InvalidArgument;
@@ -484,19 +562,18 @@ struct CoreVideoEncoder::Impl {
         if (!initialized) {
             return CoreStatus::NotInitialized;
         }
+        if (flushed) {
+            return CoreStatus::EncodeFailed;
+        }
         if (!matchesEncoderConfig(frame, config)) {
             return CoreStatus::InvalidArgument;
         }
         const PixelFormatGeometry* geom = findFormatGeometry(frame.format);
-        if (validateFallbackPlanes(frame, *geom) != CoreStatus::Ok) {
+        if (geom == nullptr || validateFallbackPlanes(frame, *geom) != CoreStatus::Ok) {
             return CoreStatus::InvalidArgument;
         }
         EncodedPacket pkt = buildFallbackVideoPacket(frame, config, encodedFrameCount++);
-        delayedPackets.push_back(std::move(pkt));
-        if (delayedPackets.size() > 1U) {
-            outPackets.push_back(std::move(delayedPackets.front()));
-            delayedPackets.pop_front();
-        }
+        enqueueDelayedPacket(delayedPackets, std::move(pkt), outPackets);
         return CoreStatus::Ok;
     }
 
@@ -535,33 +612,10 @@ CoreStatus CoreVideoEncoder::initialize(const VideoEncodeConfig& config) {
     }
 
 #ifdef OPENMEDIA_HAS_FFMPEG
-    const char* encoderName = nullptr;
-    const AVCodec* codec = selectEncoder(config.codec, config.preferHardware, encoderName);
-    if (codec == nullptr) {
-        return CoreStatus::UnsupportedCodec;
-    }
-
-    AVCodecCtxPtr ctx(avcodec_alloc_context3(codec));
-    if (!ctx) {
-        return CoreStatus::OpenFailed;
-    }
-
-    const PixelFormatMapping* pixMap = findPixelFormatMapping(config.pixelFormat);
-    const RationalTime safeTimeBase = RationalTime::sanitize(config.timeBase.num, config.timeBase.den);
-    const RationalTime safeFrameRate = RationalTime::sanitize(config.frameRate.num, config.frameRate.den);
-
-    ctx->width = config.width;
-    ctx->height = config.height;
-    ctx->pix_fmt = pixMap->avFmt;
-    ctx->time_base = AVRational{static_cast<int>(safeTimeBase.num), static_cast<int>(safeTimeBase.den)};
-    ctx->framerate = AVRational{static_cast<int>(safeFrameRate.num), static_cast<int>(safeFrameRate.den)};
-    ctx->gop_size = config.gopSize;
-    ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-
-    configureRateControl(ctx.get(), config, encoderName);
-
-    if (avcodec_open2(ctx.get(), codec, nullptr) < 0) {
-        return CoreStatus::OpenFailed;
+    AVCodecCtxPtr ctx;
+    const CoreStatus openStatus = openCodecWithFallback(config, ctx);
+    if (openStatus != CoreStatus::Ok) {
+        return openStatus;
     }
 
     std::lock_guard<std::mutex> lock(impl_->mutex);

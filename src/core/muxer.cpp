@@ -128,6 +128,11 @@ AVCodecID mapCodecId(CodecId codec) noexcept {
         {CodecId::PCM, AV_CODEC_ID_PCM_S16LE},
         {CodecId::SRT, AV_CODEC_ID_SUBRIP},
         {CodecId::WebVTT, AV_CODEC_ID_WEBVTT},
+        {CodecId::XHE_AAC, AV_CODEC_ID_AAC},
+        {CodecId::AAC, AV_CODEC_ID_AAC},
+        {CodecId::MP3, AV_CODEC_ID_MP3},
+        {CodecId::AC3, AV_CODEC_ID_AC3},
+        {CodecId::DTS, AV_CODEC_ID_DTS},
     };
     for (const auto& entry : kCodecMap) {
         if (entry.first == codec) {
@@ -138,14 +143,15 @@ AVCodecID mapCodecId(CodecId codec) noexcept {
 }
 
 AVMediaType mapMediaType(MediaType type) noexcept {
-    if (type == MediaType::Video) {
-        return AVMEDIA_TYPE_VIDEO;
-    }
-    if (type == MediaType::Audio) {
-        return AVMEDIA_TYPE_AUDIO;
-    }
-    if (type == MediaType::Subtitle) {
-        return AVMEDIA_TYPE_SUBTITLE;
+    static constexpr std::pair<MediaType, AVMediaType> kMediaTypeMap[] = {
+        {MediaType::Video, AVMEDIA_TYPE_VIDEO},
+        {MediaType::Audio, AVMEDIA_TYPE_AUDIO},
+        {MediaType::Subtitle, AVMEDIA_TYPE_SUBTITLE},
+    };
+    for (const auto& entry : kMediaTypeMap) {
+        if (entry.first == type) {
+            return entry.second;
+        }
     }
     return AVMEDIA_TYPE_UNKNOWN;
 }
@@ -263,6 +269,7 @@ void setPacketMetadata(AVPacket* pkt, const EncodedPacket& packet) noexcept {
     pkt->pts = packet.pts;
     pkt->dts = packet.dts;
     pkt->duration = packet.duration;
+    pkt->pos = -1;
     if (packet.isKeyFrame) {
         pkt->flags = AV_PKT_FLAG_KEY;
     }
@@ -402,22 +409,20 @@ void fillInterleavedS32(AVFrame* frame, const std::vector<std::vector<float>>& f
     }
 }
 
+using SampleWriterFn = void (*)(AVFrame*, const std::vector<std::vector<float>>&, int32_t);
+
 bool writeSamplesToFrame(AVFrame* frame, const std::vector<std::vector<float>>& fifo, int32_t count) {
-    if (frame->format == AV_SAMPLE_FMT_FLTP) {
-        fillPlanarFloat(frame, fifo, count);
-        return true;
-    }
-    if (frame->format == AV_SAMPLE_FMT_FLT) {
-        fillInterleavedFloat(frame, fifo, count);
-        return true;
-    }
-    if (frame->format == AV_SAMPLE_FMT_S16) {
-        fillInterleavedS16(frame, fifo, count);
-        return true;
-    }
-    if (frame->format == AV_SAMPLE_FMT_S32) {
-        fillInterleavedS32(frame, fifo, count);
-        return true;
+    static constexpr std::pair<AVSampleFormat, SampleWriterFn> kSampleWriters[] = {
+        {AV_SAMPLE_FMT_FLTP, &fillPlanarFloat},
+        {AV_SAMPLE_FMT_FLT, &fillInterleavedFloat},
+        {AV_SAMPLE_FMT_S16, &fillInterleavedS16},
+        {AV_SAMPLE_FMT_S32, &fillInterleavedS32},
+    };
+    for (const auto& entry : kSampleWriters) {
+        if (frame->format == entry.first) {
+            entry.second(frame, fifo, count);
+            return true;
+        }
     }
     return false;
 }
@@ -468,8 +473,24 @@ CoreStatus drainEncoderPackets(AVCodecContext* ctx, std::vector<EncodedPacket>& 
 
 #else
 
+bool isSupportedMuxCodec(CodecId codec) noexcept {
+    static constexpr CodecId kSupportedMuxCodecs[] = {
+        CodecId::AV1, CodecId::VP9, CodecId::VP8, CodecId::H264,
+        CodecId::HEVC, CodecId::ProRes, CodecId::FFV1, CodecId::Opus,
+        CodecId::FLAC, CodecId::Vorbis, CodecId::PCM, CodecId::SRT,
+        CodecId::WebVTT, CodecId::XHE_AAC, CodecId::AAC, CodecId::MP3,
+        CodecId::AC3, CodecId::DTS,
+    };
+    for (CodecId entry : kSupportedMuxCodecs) {
+        if (entry == codec) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool isValidMuxStreamInfo(const StreamInfo& info) noexcept {
-    return info.type != MediaType::Unknown && info.codec != CodecId::Unknown;
+    return info.type != MediaType::Unknown && isSupportedMuxCodec(info.codec);
 }
 
 bool isSupportedAudioEncoderCodec(CodecId codec) noexcept {
@@ -614,6 +635,9 @@ struct CoreMuxer::Impl {
             outputStream.write(reinterpret_cast<const char*>(packet.data.data()),
                                static_cast<std::streamsize>(packet.data.size()));
         }
+        if (!outputStream.good()) {
+            return CoreStatus::EncodeFailed;
+        }
         return CoreStatus::Ok;
     }
 #endif
@@ -622,9 +646,14 @@ struct CoreMuxer::Impl {
 CoreMuxer::CoreMuxer() : impl_(std::make_unique<Impl>()) {}
 
 CoreMuxer::~CoreMuxer() {
-    if (impl_ && impl_->isReadyForPackets()) {
-        writeTrailerAndClose();
+    if (!impl_ || !impl_->isContainerOpen()) {
+        return;
     }
+    if (impl_->isReadyForPackets()) {
+        writeTrailerAndClose();
+        return;
+    }
+    impl_->reset();
 }
 
 CoreMuxer::CoreMuxer(CoreMuxer&&) noexcept = default;
@@ -662,10 +691,15 @@ CoreStatus CoreMuxer::writeHeader() {
     }
 #ifdef OPENMEDIA_HAS_FFMPEG
     if (avformat_write_header(impl_->formatCtx.get(), nullptr) < 0) {
+        impl_->reset();
         return CoreStatus::OpenFailed;
     }
 #else
     writeFallbackEbmlHeader(impl_->outputStream, impl_->formatName);
+    if (!impl_->outputStream.good()) {
+        impl_->reset();
+        return CoreStatus::OpenFailed;
+    }
 #endif
     impl_->headerWritten = true;
     return CoreStatus::Ok;
@@ -698,6 +732,9 @@ CoreStatus CoreMuxer::writeTrailerAndClose() {
 #else
     if (impl_->headerWritten) {
         writeFallbackCuesTrailer(impl_->outputStream);
+        if (!impl_->outputStream.good()) {
+            status = CoreStatus::EncodeFailed;
+        }
     }
 #endif
     impl_->reset();

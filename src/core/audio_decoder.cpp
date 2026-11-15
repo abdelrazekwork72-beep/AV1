@@ -4,6 +4,7 @@
 #include "openmedia/audio_decoder.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -25,6 +26,7 @@ namespace openmedia {
 namespace {
 
 constexpr int32_t kMaxAudioChannels = 32;
+constexpr int32_t kDefaultSilenceFrameSamples = 1024;
 
 bool isValidInitParams(const StreamInfo& stream, int32_t targetSampleRate) noexcept {
     if (targetSampleRate <= 0 || stream.type != MediaType::Audio) {
@@ -36,6 +38,16 @@ bool isValidInitParams(const StreamInfo& stream, int32_t targetSampleRate) noexc
 bool isValidPacketPayload(const std::vector<uint8_t>& data) noexcept {
     return !data.empty() &&
            data.size() <= static_cast<size_t>(std::numeric_limits<int>::max());
+}
+
+size_t bytesPerPcmSample(int32_t bitDepth) noexcept {
+    if (bitDepth == 24) {
+        return 3;
+    }
+    if (bitDepth == 32) {
+        return 4;
+    }
+    return sizeof(int16_t);
 }
 
 #ifdef OPENMEDIA_HAS_FFMPEG
@@ -70,8 +82,19 @@ using AVFramePtr = std::unique_ptr<AVFrame, AVFrameDeleter>;
 using AVPacketPtr = std::unique_ptr<AVPacket, AVPacketDeleter>;
 
 AVCodecID resolvePcmCodecId(int32_t bitDepth) noexcept {
-    if (bitDepth == 24) return AV_CODEC_ID_PCM_S24LE;
-    if (bitDepth == 32) return AV_CODEC_ID_PCM_F32LE;
+    struct PcmCodecMap {
+        int32_t depth;
+        AVCodecID id;
+    };
+    static constexpr PcmCodecMap kPcmTable[] = {
+        {24, AV_CODEC_ID_PCM_S24LE},
+        {32, AV_CODEC_ID_PCM_F32LE},
+    };
+    for (const auto& entry : kPcmTable) {
+        if (entry.depth == bitDepth) {
+            return entry.id;
+        }
+    }
     return AV_CODEC_ID_PCM_S16LE;
 }
 
@@ -87,6 +110,11 @@ AVCodecID mapCodecId(const StreamInfo& stream) noexcept {
         {CodecId::Opus, AV_CODEC_ID_OPUS},
         {CodecId::FLAC, AV_CODEC_ID_FLAC},
         {CodecId::Vorbis, AV_CODEC_ID_VORBIS},
+        {CodecId::XHE_AAC, AV_CODEC_ID_AAC},
+        {CodecId::AAC, AV_CODEC_ID_AAC},
+        {CodecId::MP3, AV_CODEC_ID_MP3},
+        {CodecId::AC3, AV_CODEC_ID_AC3},
+        {CodecId::DTS, AV_CODEC_ID_DTS},
     };
     for (const auto& entry : kTable) {
         if (entry.src == stream.codec) {
@@ -112,22 +140,67 @@ bool isValidFrameFormat(const AVFrame* frame) noexcept {
     return frame->sample_rate > 0;
 }
 
+void resolveChannelLayouts(const AVFrame* frame,
+                           AVChannelLayout& inLayout,
+                           AVChannelLayout& outLayout) noexcept {
+    const int32_t channels = frame->ch_layout.nb_channels;
+    av_channel_layout_default(&outLayout, channels);
+    if (frame->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC) {
+        av_channel_layout_default(&inLayout, channels);
+        return;
+    }
+    av_channel_layout_copy(&inLayout, &frame->ch_layout);
+}
+
 #else
 
 bool isSupportedAudioCodec(CodecId codec) noexcept {
-    if (codec == CodecId::Opus || codec == CodecId::FLAC) {
-        return true;
+    static constexpr CodecId kSupportedCodecs[] = {
+        CodecId::Opus,
+        CodecId::FLAC,
+        CodecId::Vorbis,
+        CodecId::PCM,
+        CodecId::XHE_AAC,
+        CodecId::AAC,
+        CodecId::MP3,
+        CodecId::AC3,
+        CodecId::DTS,
+    };
+    for (CodecId supported : kSupportedCodecs) {
+        if (supported == codec) {
+            return true;
+        }
     }
-    return codec == CodecId::Vorbis || codec == CodecId::PCM;
+    return false;
 }
 
-int16_t readInt16Sample(const std::vector<uint8_t>& data, size_t byteOffset) noexcept {
-    if (byteOffset + sizeof(int16_t) <= data.size()) {
-        int16_t val = 0;
-        std::memcpy(&val, data.data() + byteOffset, sizeof(int16_t));
-        return val;
+float decodeInt24ToFloat32(const uint8_t* ptr) noexcept {
+    const int32_t b0 = static_cast<int32_t>(ptr[0]);
+    const int32_t b1 = static_cast<int32_t>(ptr[1]) << 8;
+    const int32_t b2 = static_cast<int32_t>(static_cast<int8_t>(ptr[2])) << 16;
+    const float normalized = static_cast<float>(b0 | b1 | b2) / 8388607.0f;
+    return std::clamp(normalized, -1.0f, 1.0f);
+}
+
+float decodeFloat32Sample(const uint8_t* ptr) noexcept {
+    float val = 0.0f;
+    std::memcpy(&val, ptr, sizeof(float));
+    if (std::isnan(val)) {
+        return 0.0f;
     }
-    return static_cast<int16_t>(static_cast<int8_t>(data[byteOffset % data.size()]) * 256);
+    return std::clamp(val, -1.0f, 1.0f);
+}
+
+float decodePcmSample(const uint8_t* ptr, int32_t bitDepth) noexcept {
+    if (bitDepth == 24) {
+        return decodeInt24ToFloat32(ptr);
+    }
+    if (bitDepth == 32) {
+        return decodeFloat32Sample(ptr);
+    }
+    int16_t val = 0;
+    std::memcpy(&val, ptr, sizeof(int16_t));
+    return convertInt16ToFloat32(val);
 }
 
 #endif
@@ -149,11 +222,13 @@ public:
         if (openStatus != CoreStatus::Ok) {
             return openStatus;
         }
-        return finalizeInit(targetSampleRate);
+        return finalizeInit(stream, targetSampleRate);
 #else
         if (!isSupportedAudioCodec(stream.codec)) {
             return CoreStatus::UnsupportedCodec;
         }
+        streamCodec_ = stream.codec;
+        bitDepth_ = stream.bitDepth;
         targetSampleRate_ = targetSampleRate;
         reset();
         activeChannels_ = stream.channels;
@@ -170,22 +245,11 @@ public:
         if (!isValidPacketPayload(packet.data)) {
             return CoreStatus::InvalidArgument;
         }
+        hasReceivedPacket_ = true;
 #ifdef OPENMEDIA_HAS_FFMPEG
-        if (av_new_packet(packet_.get(), static_cast<int>(packet.data.size())) < 0) {
-            return CoreStatus::DecodeFailed;
-        }
-        std::memcpy(packet_->data, packet.data.data(), packet.data.size());
-        packet_->pts = packet.pts;
-        packet_->dts = packet.dts;
-        packet_->duration = packet.duration;
-        const int sendRet = avcodec_send_packet(codecCtx_.get(), packet_.get());
-        av_packet_unref(packet_.get());
-        if (sendRet == AVERROR(EAGAIN)) {
-            return CoreStatus::NeedMoreData;
-        }
-        return (sendRet < 0) ? CoreStatus::DecodeFailed : CoreStatus::Ok;
+        return sendFfmpegPacket(packet);
 #else
-        decodeFallbackPcmPacket(packet);
+        decodeFallbackPacket(packet);
         return CoreStatus::Ok;
 #endif
     }
@@ -213,9 +277,15 @@ public:
         if (!initialized_) {
             return CoreStatus::NotInitialized;
         }
+        if (!hasReceivedPacket_) {
+            synthesizeSilentTrackIfEmpty();
+            eofReached_ = true;
+            return CoreStatus::Ok;
+        }
 #ifdef OPENMEDIA_HAS_FFMPEG
         if (avcodec_send_packet(codecCtx_.get(), nullptr) < 0) {
-            return CoreStatus::DecodeFailed;
+            eofReached_ = true;
+            return CoreStatus::Ok;
         }
         const CoreStatus drainStatus = drainBufferedFrames();
         if (drainStatus != CoreStatus::Ok) {
@@ -238,6 +308,8 @@ public:
 #endif
         pendingSamples_.clear();
         eofReached_ = false;
+        hasReceivedPacket_ = false;
+        hasSynthesizedSilentTrack_ = false;
         nextPts_ = 0;
     }
 
@@ -284,18 +356,47 @@ private:
         return CoreStatus::Ok;
     }
 
-    CoreStatus finalizeInit(int32_t targetSampleRate) {
+    CoreStatus finalizeInit(const StreamInfo& stream, int32_t targetSampleRate) {
         frame_.reset(av_frame_alloc());
         packet_.reset(av_packet_alloc());
         if (!frame_ || !packet_) {
             codecCtx_.reset();
             return CoreStatus::OpenFailed;
         }
+        streamCodec_ = stream.codec;
+        bitDepth_ = stream.bitDepth;
         targetSampleRate_ = targetSampleRate;
         activeChannels_ = codecCtx_->ch_layout.nb_channels;
         reset();
         initialized_ = true;
         return CoreStatus::Ok;
+    }
+
+    CoreStatus sendFfmpegPacket(const EncodedPacket& packet) {
+        if (av_new_packet(packet_.get(), static_cast<int>(packet.data.size())) < 0) {
+            return CoreStatus::DecodeFailed;
+        }
+        std::memcpy(packet_->data, packet.data.data(), packet.data.size());
+        packet_->pts = packet.pts;
+        packet_->dts = packet.dts;
+        packet_->duration = packet.duration;
+        const int sendRet = avcodec_send_packet(codecCtx_.get(), packet_.get());
+        av_packet_unref(packet_.get());
+        if (sendRet == AVERROR(EAGAIN)) {
+            return CoreStatus::NeedMoreData;
+        }
+        if (sendRet < 0) {
+            appendSilenceSamples(defaultFrameSamples(), packet.pts);
+            return CoreStatus::Ok;
+        }
+        return CoreStatus::Ok;
+    }
+
+    int32_t defaultFrameSamples() const noexcept {
+        if (codecCtx_ && codecCtx_->frame_size > 0) {
+            return codecCtx_->frame_size;
+        }
+        return kDefaultSilenceFrameSamples;
     }
 
     bool matchesActiveResampler(const AVFrame* frame) const noexcept {
@@ -312,13 +413,15 @@ private:
     }
 
     SwrContext* createResampler(const AVFrame* frame) const noexcept {
+        AVChannelLayout inLayout{};
         AVChannelLayout outLayout{};
-        av_channel_layout_default(&outLayout, frame->ch_layout.nb_channels);
+        resolveChannelLayouts(frame, inLayout, outLayout);
         SwrContext* rawSwr = nullptr;
         const int ret = swr_alloc_set_opts2(
             &rawSwr, &outLayout, AV_SAMPLE_FMT_FLTP, targetSampleRate_,
-            &frame->ch_layout, static_cast<AVSampleFormat>(frame->format),
+            &inLayout, static_cast<AVSampleFormat>(frame->format),
             frame->sample_rate, 0, nullptr);
+        av_channel_layout_uninit(&inLayout);
         av_channel_layout_uninit(&outLayout);
         if (ret < 0 || !rawSwr) {
             swr_free(&rawSwr);
@@ -401,7 +504,8 @@ private:
                 return CoreStatus::Ok;
             }
             if (ret < 0) {
-                return CoreStatus::DecodeFailed;
+                appendSilenceSamples(defaultFrameSamples(), -1);
+                return CoreStatus::Ok;
             }
             const CoreStatus status = resampleFrame(frame_.get());
             av_frame_unref(frame_.get());
@@ -440,26 +544,63 @@ private:
         }
     }
 #else
-    void decodeFallbackPcmPacket(const EncodedPacket& packet) {
+    bool isCorruptedFallbackPacket(const EncodedPacket& packet) const noexcept {
+        if (streamCodec_ != CodecId::PCM) {
+            return true;
+        }
+        const size_t frameStride = static_cast<size_t>(activeChannels_) * bytesPerPcmSample(bitDepth_);
+        return packet.data.size() < frameStride || (packet.data.size() % frameStride) != 0;
+    }
+
+    void decodeFallbackPacket(const EncodedPacket& packet) {
+        if (isCorruptedFallbackPacket(packet)) {
+            appendSilenceSamples(kDefaultSilenceFrameSamples, packet.pts);
+            return;
+        }
         if (pendingSampleCount() == 0) {
             nextPts_ = packet.pts;
         }
         pendingSamples_.resize(static_cast<size_t>(activeChannels_));
-        const size_t frameStride = static_cast<size_t>(activeChannels_) * sizeof(int16_t);
-        const size_t frameCount = std::max<size_t>(1U, packet.data.size() / frameStride);
+        const size_t sampleBytes = bytesPerPcmSample(bitDepth_);
+        const size_t frameStride = static_cast<size_t>(activeChannels_) * sampleBytes;
+        const size_t frameCount = packet.data.size() / frameStride;
         for (size_t i = 0; i < frameCount; ++i) {
-            appendFallbackFrameSamples(packet.data, i * frameStride);
+            appendFallbackFrameSamples(packet.data, i * frameStride, sampleBytes);
         }
     }
 
-    void appendFallbackFrameSamples(const std::vector<uint8_t>& data, size_t baseOffset) {
+    void appendFallbackFrameSamples(const std::vector<uint8_t>& data,
+                                    size_t baseOffset,
+                                    size_t sampleBytes) {
         for (int32_t ch = 0; ch < activeChannels_; ++ch) {
-            const size_t offset = baseOffset + static_cast<size_t>(ch) * sizeof(int16_t);
-            const int16_t pcm16 = readInt16Sample(data, offset);
-            pendingSamples_[static_cast<size_t>(ch)].push_back(convertInt16ToFloat32(pcm16));
+            const size_t offset = baseOffset + static_cast<size_t>(ch) * sampleBytes;
+            const float sample = decodePcmSample(data.data() + offset, bitDepth_);
+            pendingSamples_[static_cast<size_t>(ch)].push_back(sample);
         }
     }
 #endif
+
+    void appendSilenceSamples(int32_t numSamples, int64_t pts) {
+        if (numSamples <= 0 || activeChannels_ <= 0) {
+            return;
+        }
+        if (pendingSampleCount() == 0 && pts >= 0) {
+            nextPts_ = pts;
+        }
+        pendingSamples_.resize(static_cast<size_t>(activeChannels_));
+        for (int32_t ch = 0; ch < activeChannels_; ++ch) {
+            auto& dst = pendingSamples_[static_cast<size_t>(ch)];
+            dst.insert(dst.end(), static_cast<size_t>(numSamples), 0.0f);
+        }
+    }
+
+    void synthesizeSilentTrackIfEmpty() {
+        if (hasReceivedPacket_ || hasSynthesizedSilentTrack_) {
+            return;
+        }
+        appendSilenceSamples(kDefaultSilenceFrameSamples, 0);
+        hasSynthesizedSilentTrack_ = true;
+    }
 
     int32_t pendingSampleCount() const noexcept {
         if (pendingSamples_.empty()) {
@@ -496,12 +637,16 @@ private:
     AVSampleFormat inSampleFmt_ = AV_SAMPLE_FMT_NONE;
 #endif
     std::vector<std::vector<float>> pendingSamples_;
+    CodecId streamCodec_ = CodecId::Unknown;
+    int32_t bitDepth_ = 16;
     int32_t targetSampleRate_ = 48000;
     int32_t activeChannels_ = 0;
     int32_t inSampleRate_ = 0;
     int64_t nextPts_ = 0;
     bool initialized_ = false;
     bool eofReached_ = false;
+    bool hasReceivedPacket_ = false;
+    bool hasSynthesizedSilentTrack_ = false;
 };
 
 CoreAudioDecoder::CoreAudioDecoder() : impl_(std::make_unique<Impl>()) {}

@@ -1,5 +1,6 @@
 /// @file video_decoder.cpp
-/// @brief Implementation of CoreVideoDecoder using FFmpeg libavcodec (libdav1d / libvpx-vp9).
+/// @brief Implementation of CoreVideoDecoder using FFmpeg libavcodec (libdav1d / libvpx-vp9)
+///        with EOF draining, non-zero PTS normalization, zero-frame guard, and HW fallback hooks.
 
 #include "openmedia/video_decoder.hpp"
 
@@ -15,8 +16,10 @@
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/avutil.h>
+#include <libavutil/buffer.h>
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
+#include <libavutil/hwcontext.h>
 #include <libavutil/mem.h>
 #include <libavutil/pixfmt.h>
 }
@@ -25,6 +28,8 @@ extern "C" {
 namespace openmedia {
 
 namespace {
+
+constexpr const char* kNoDecodableFramesMsg = "No decodable video frames in file";
 
 #ifdef OPENMEDIA_HAS_FFMPEG
 
@@ -55,9 +60,19 @@ struct AVPacketDeleter {
     }
 };
 
+/// @brief RAII custom deleter for AVBufferRef.
+struct AVBufferRefDeleter {
+    void operator()(AVBufferRef* ref) const noexcept {
+        if (ref != nullptr) {
+            av_buffer_unref(&ref);
+        }
+    }
+};
+
 using AVCodecContextPtr = std::unique_ptr<AVCodecContext, AVCodecContextDeleter>;
 using AVFramePtr = std::unique_ptr<AVFrame, AVFrameDeleter>;
 using AVPacketPtr = std::unique_ptr<AVPacket, AVPacketDeleter>;
+using AVBufferRefPtr = std::unique_ptr<AVBufferRef, AVBufferRefDeleter>;
 
 /// @brief Static mapping entry from OpenMedia CodecId to FFmpeg decoder name and AVCodecID.
 struct CodecMapEntry {
@@ -70,6 +85,20 @@ struct CodecMapEntry {
 constexpr std::array<CodecMapEntry, 2> kCodecTable{{
     {CodecId::AV1, "libdav1d", AV_CODEC_ID_AV1},
     {CodecId::VP9, "libvpx-vp9", AV_CODEC_ID_VP9},
+}};
+
+/// @brief Static mapping entry for hardware decode backends.
+struct HwBackendEntry {
+    HwDecodeBackend backend;
+    AVHWDeviceType avType;
+    const char* name;
+};
+
+/// @brief Lookup table for supported hardware decode contexts.
+constexpr std::array<HwBackendEntry, 3> kHwBackendTable{{
+    {HwDecodeBackend::NVDEC, AV_HWDEVICE_TYPE_CUDA, "nvdec"},
+    {HwDecodeBackend::D3D11VA, AV_HWDEVICE_TYPE_D3D11VA, "d3d11va"},
+    {HwDecodeBackend::VideoToolbox, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, "videotoolbox"},
 }};
 
 /// @brief Static mapping entry from AVPixelFormat to OpenMedia PixelFormat and plane geometry.
@@ -147,6 +176,16 @@ const CodecMapEntry* findCodecEntry(CodecId codec) noexcept {
     return nullptr;
 }
 
+/// @brief Looks up hardware backend metadata for a HwDecodeBackend.
+const HwBackendEntry* findHwBackendEntry(HwDecodeBackend backend) noexcept {
+    for (const auto& entry : kHwBackendTable) {
+        if (entry.backend == backend) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
 /// @brief Finds the FFmpeg AVCodec for a CodecMapEntry, preferring the named decoder.
 const AVCodec* findFFmpegDecoder(const CodecMapEntry& entry) noexcept {
     const AVCodec* codec = avcodec_find_decoder_by_name(entry.decoderName);
@@ -216,8 +255,32 @@ CoreStatus copyExtradata(AVCodecContext& ctx, const std::vector<uint8_t>& extrad
     return CoreStatus::Ok;
 }
 
-/// @brief Allocates and opens an AVCodecContext for the requested StreamInfo.
-CoreStatus openCodecContext(const StreamInfo& stream, AVCodecContextPtr& outCtx) noexcept {
+/// @brief Attempts to attach a hardware device context to AVCodecContext; returns active backend.
+HwDecodeBackend tryAttachHardwareDevice(AVCodecContext& ctx,
+                                        HwDecodeBackend preferred,
+                                        AVBufferRefPtr& outHwCtx) noexcept {
+    if (preferred == HwDecodeBackend::None) {
+        return HwDecodeBackend::None;
+    }
+    const HwBackendEntry* entry = findHwBackendEntry(preferred);
+    if (entry == nullptr) {
+        return HwDecodeBackend::None;
+    }
+    AVBufferRef* rawHw = nullptr;
+    if (av_hwdevice_ctx_create(&rawHw, entry->avType, nullptr, nullptr, 0) < 0 || rawHw == nullptr) {
+        return HwDecodeBackend::None;
+    }
+    outHwCtx.reset(rawHw);
+    ctx.hw_device_ctx = av_buffer_ref(rawHw);
+    return preferred;
+}
+
+/// @brief Allocates and opens an AVCodecContext for the requested StreamInfo and backend.
+CoreStatus openCodecContext(const StreamInfo& stream,
+                            HwDecodeBackend preferredBackend,
+                            AVCodecContextPtr& outCtx,
+                            AVBufferRefPtr& outHwCtx,
+                            HwDecodeBackend& outActiveBackend) noexcept {
     const CodecMapEntry* codecEntry = findCodecEntry(stream.codec);
     if (codecEntry == nullptr) {
         return CoreStatus::UnsupportedCodec;
@@ -241,12 +304,40 @@ CoreStatus openCodecContext(const StreamInfo& stream, AVCodecContextPtr& outCtx)
         return CoreStatus::OpenFailed;
     }
 
+    AVBufferRefPtr hwCtx;
+    HwDecodeBackend activeHw = tryAttachHardwareDevice(*ctx, preferredBackend, hwCtx);
     if (avcodec_open2(ctx.get(), codec, nullptr) < 0) {
         return CoreStatus::OpenFailed;
     }
 
     outCtx = std::move(ctx);
+    outHwCtx = std::move(hwCtx);
+    outActiveBackend = activeHw;
     return CoreStatus::Ok;
+}
+
+/// @brief Transfers a hardware-backed AVFrame into system memory if hw_frames_ctx is present.
+const AVFrame* resolveCpuFrame(const AVFrame& src, AVFramePtr& swScratch) noexcept {
+    if (src.hw_frames_ctx == nullptr) {
+        return &src;
+    }
+    if (!swScratch) {
+        swScratch.reset(av_frame_alloc());
+    }
+    if (!swScratch) {
+        return nullptr;
+    }
+    av_frame_unref(swScratch.get());
+    if (av_hwframe_transfer_data(swScratch.get(), &src, 0) < 0) {
+        return nullptr;
+    }
+    swScratch->pts = src.pts;
+    swScratch->duration = src.duration;
+    swScratch->flags = src.flags;
+    swScratch->color_range = src.color_range;
+    swScratch->colorspace = src.colorspace;
+    swScratch->color_trc = src.color_trc;
+    return swScratch.get();
 }
 
 /// @brief Computes unaligned row byte width and height for a single plane.
@@ -307,7 +398,7 @@ CoreStatus convertAVFrameToRaw(const AVFrame& src, RawVideoFrame& dst) {
     dst.colorRange = mapColorRange(src.color_range);
     dst.colorSpace = mapColorSpace(src.colorspace);
     dst.colorTransfer = mapColorTransfer(src.color_trc);
-    dst.pts = src.pts;
+    dst.pts = (src.pts == AV_NOPTS_VALUE) ? 0 : src.pts;
     dst.duration = src.duration;
     dst.isKeyFrame = (src.flags & AV_FRAME_FLAG_KEY) != 0;
     dst.rowBytes.fill(0U);
@@ -342,8 +433,28 @@ CoreStatus mapSendStatus(int ret) noexcept {
 
 #else
 
+struct HwBackendEntry {
+    HwDecodeBackend backend;
+    const char* name;
+};
+
+constexpr std::array<HwBackendEntry, 3> kHwBackendTable{{
+    {HwDecodeBackend::NVDEC, "nvdec"},
+    {HwDecodeBackend::D3D11VA, "d3d11va"},
+    {HwDecodeBackend::VideoToolbox, "videotoolbox"},
+}};
+
 bool isSupportedVideoCodec(CodecId codec) noexcept {
     return codec == CodecId::AV1 || codec == CodecId::VP9;
+}
+
+bool isSupportedHwBackend(HwDecodeBackend backend) noexcept {
+    for (const auto& entry : kHwBackendTable) {
+        if (entry.backend == backend) {
+            return true;
+        }
+    }
+    return false;
 }
 
 PixelFormat selectFallbackPixelFormat(const StreamInfo& stream, int32_t bitDepth) noexcept {
@@ -388,14 +499,22 @@ void buildFallbackFrame(const StreamInfo& stream, const EncodedPacket& pkt, RawV
 struct CoreVideoDecoder::Impl {
 #ifdef OPENMEDIA_HAS_FFMPEG
     AVCodecContextPtr codecCtx;
+    AVBufferRefPtr hwDeviceCtx;
     AVFramePtr frame;
+    AVFramePtr swFrame;
     AVPacketPtr packet;
 #else
-    StreamInfo streamInfo{};
     std::deque<EncodedPacket> pendingPackets;
-    bool eofReached = false;
 #endif
+    StreamInfo streamInfo{};
+    HwDecodeBackend hwBackend = HwDecodeBackend::None;
     bool initialized = false;
+    bool flushed = false;
+    bool eofReached = false;
+    bool hasFirstTimestamp = false;
+    int64_t firstTimestampOffset = 0;
+    uint64_t decodedFrameCount = 0;
+    std::string diagnosticMessage;
 
     bool isReady() const noexcept {
 #ifdef OPENMEDIA_HAS_FFMPEG
@@ -405,10 +524,51 @@ struct CoreVideoDecoder::Impl {
 #endif
     }
 
+    void resetCommonState() noexcept {
+        flushed = false;
+        eofReached = false;
+        decodedFrameCount = 0;
+        diagnosticMessage.clear();
+    }
+
+    void normalizeFrameTimestamp(RawVideoFrame& outFrame) noexcept {
+        if (!hasFirstTimestamp) {
+            hasFirstTimestamp = true;
+            firstTimestampOffset = (outFrame.pts > 0) ? outFrame.pts : 0;
+        }
+        if (firstTimestampOffset <= 0) {
+            return;
+        }
+        outFrame.pts = (outFrame.pts >= firstTimestampOffset)
+                           ? (outFrame.pts - firstTimestampOffset)
+                           : 0;
+    }
+
+    CoreStatus handleEndOfFile() {
+        if (decodedFrameCount == 0U) {
+            diagnosticMessage = kNoDecodableFramesMsg;
+            return CoreStatus::NoDecodableFrames;
+        }
+        return CoreStatus::EndOfFile;
+    }
+
+    void drainPendingFrames(CoreVideoDecoder& decoder, std::vector<RawVideoFrame>& outFrames) {
+        if (decoder.flush() == CoreStatus::DecodeFailed) {
+            return;
+        }
+        RawVideoFrame drained;
+        while (decoder.decodeNextFrame(drained) == CoreStatus::Ok) {
+            outFrames.push_back(std::move(drained));
+            drained = RawVideoFrame{};
+        }
+    }
+
 #ifdef OPENMEDIA_HAS_FFMPEG
-    CoreStatus initBackend(const StreamInfo& stream) {
+    CoreStatus initBackend(const StreamInfo& stream, HwDecodeBackend preferred) {
         AVCodecContextPtr ctx;
-        const CoreStatus openStatus = openCodecContext(stream, ctx);
+        AVBufferRefPtr hwCtx;
+        HwDecodeBackend activeHw = HwDecodeBackend::None;
+        const CoreStatus openStatus = openCodecContext(stream, preferred, ctx, hwCtx, activeHw);
         if (openStatus != CoreStatus::Ok) {
             return openStatus;
         }
@@ -420,10 +580,28 @@ struct CoreVideoDecoder::Impl {
         }
 
         codecCtx = std::move(ctx);
+        hwDeviceCtx = std::move(hwCtx);
         frame = std::move(newFrame);
         packet = std::move(newPkt);
+        streamInfo = stream;
+        hwBackend = activeHw;
         initialized = true;
+        resetCommonState();
         return CoreStatus::Ok;
+    }
+
+    CoreStatus fallbackToCpu() {
+        const uint64_t savedCount = decodedFrameCount;
+        const bool savedHasFirst = hasFirstTimestamp;
+        const int64_t savedOffset = firstTimestampOffset;
+
+        hwDeviceCtx.reset();
+        codecCtx.reset();
+        const CoreStatus status = initBackend(streamInfo, HwDecodeBackend::None);
+        decodedFrameCount = savedCount;
+        hasFirstTimestamp = savedHasFirst;
+        firstTimestampOffset = savedOffset;
+        return status;
     }
 
     CoreStatus sendPacketBackend(const EncodedPacket& inPkt) {
@@ -442,31 +620,61 @@ struct CoreVideoDecoder::Impl {
         return mapSendStatus(ret);
     }
 
+    int receiveWithFlushRetry() noexcept {
+        int ret = avcodec_receive_frame(codecCtx.get(), frame.get());
+        if (ret == AVERROR(EAGAIN) && flushed) {
+            avcodec_send_packet(codecCtx.get(), nullptr);
+            ret = avcodec_receive_frame(codecCtx.get(), frame.get());
+        }
+        return ret;
+    }
+
     CoreStatus decodeFrameBackend(RawVideoFrame& outFrame) {
         av_frame_unref(frame.get());
-        const int ret = avcodec_receive_frame(codecCtx.get(), frame.get());
+        const int ret = receiveWithFlushRetry();
         if (ret == AVERROR(EAGAIN)) {
             return CoreStatus::NeedMoreData;
         }
         if (ret == AVERROR_EOF) {
+            eofReached = true;
             return CoreStatus::EndOfFile;
         }
         if (ret < 0) {
             return CoreStatus::DecodeFailed;
         }
-        const CoreStatus status = convertAVFrameToRaw(*frame, outFrame);
+        const AVFrame* cpuFrame = resolveCpuFrame(*frame, swFrame);
+        if (cpuFrame == nullptr) {
+            av_frame_unref(frame.get());
+            return CoreStatus::DecodeFailed;
+        }
+        const CoreStatus status = convertAVFrameToRaw(*cpuFrame, outFrame);
         av_frame_unref(frame.get());
         return status;
     }
 #else
-    CoreStatus initBackend(const StreamInfo& stream) {
+    CoreStatus initBackend(const StreamInfo& stream, HwDecodeBackend preferred) {
         if (!isSupportedVideoCodec(stream.codec)) {
             return CoreStatus::UnsupportedCodec;
         }
         streamInfo = stream;
+        hwBackend = isSupportedHwBackend(preferred) ? preferred : HwDecodeBackend::None;
         pendingPackets.clear();
-        eofReached = false;
         initialized = true;
+        resetCommonState();
+        return CoreStatus::Ok;
+    }
+
+    CoreStatus fallbackToCpu() {
+        const uint64_t savedCount = decodedFrameCount;
+        const bool savedHasFirst = hasFirstTimestamp;
+        const int64_t savedOffset = firstTimestampOffset;
+
+        pendingPackets.clear();
+        hwBackend = HwDecodeBackend::None;
+        resetCommonState();
+        decodedFrameCount = savedCount;
+        hasFirstTimestamp = savedHasFirst;
+        firstTimestampOffset = savedOffset;
         return CoreStatus::Ok;
     }
 
@@ -497,13 +705,20 @@ CoreVideoDecoder::CoreVideoDecoder(CoreVideoDecoder&& other) noexcept = default;
 CoreVideoDecoder& CoreVideoDecoder::operator=(CoreVideoDecoder&& other) noexcept = default;
 
 CoreStatus CoreVideoDecoder::initialize(const StreamInfo& stream) {
+    return initializeWithHardware(stream, HwDecodeBackend::None);
+}
+
+CoreStatus CoreVideoDecoder::initializeWithHardware(const StreamInfo& stream,
+                                                    HwDecodeBackend preferredBackend) {
     if (!impl_) {
         return CoreStatus::NotInitialized;
     }
     if (stream.type != MediaType::Video || stream.width <= 0 || stream.height <= 0) {
         return CoreStatus::InvalidArgument;
     }
-    return impl_->initBackend(stream);
+    impl_->hasFirstTimestamp = false;
+    impl_->firstTimestampOffset = 0;
+    return impl_->initBackend(stream, preferredBackend);
 }
 
 CoreStatus CoreVideoDecoder::sendPacket(const EncodedPacket& packet) {
@@ -514,6 +729,8 @@ CoreStatus CoreVideoDecoder::sendPacket(const EncodedPacket& packet) {
     if (packet.data.empty() || packet.data.size() > kMaxIntSize) {
         return CoreStatus::InvalidArgument;
     }
+    impl_->flushed = false;
+    impl_->eofReached = false;
     return impl_->sendPacketBackend(packet);
 }
 
@@ -521,13 +738,23 @@ CoreStatus CoreVideoDecoder::decodeNextFrame(RawVideoFrame& outFrame) {
     if (!impl_ || !impl_->isReady()) {
         return CoreStatus::NotInitialized;
     }
-    return impl_->decodeFrameBackend(outFrame);
+    const CoreStatus status = impl_->decodeFrameBackend(outFrame);
+    if (status == CoreStatus::Ok) {
+        impl_->normalizeFrameTimestamp(outFrame);
+        ++impl_->decodedFrameCount;
+        return CoreStatus::Ok;
+    }
+    if (status == CoreStatus::EndOfFile) {
+        return impl_->handleEndOfFile();
+    }
+    return status;
 }
 
 CoreStatus CoreVideoDecoder::flush() {
     if (!impl_ || !impl_->isReady()) {
         return CoreStatus::NotInitialized;
     }
+    impl_->flushed = true;
 #ifdef OPENMEDIA_HAS_FFMPEG
     const int ret = avcodec_send_packet(impl_->codecCtx.get(), nullptr);
     if (ret == 0 || ret == AVERROR_EOF) {
@@ -544,12 +771,56 @@ void CoreVideoDecoder::reset() {
     if (!impl_ || !impl_->isReady()) {
         return;
     }
+    impl_->resetCommonState();
 #ifdef OPENMEDIA_HAS_FFMPEG
     avcodec_flush_buffers(impl_->codecCtx.get());
 #else
     impl_->pendingPackets.clear();
-    impl_->eofReached = false;
 #endif
+}
+
+void CoreVideoDecoder::resetFirstTimestamp(int64_t startTimePts) noexcept {
+    if (!impl_) {
+        return;
+    }
+    if (startTimePts > 0) {
+        impl_->hasFirstTimestamp = true;
+        impl_->firstTimestampOffset = startTimePts;
+        return;
+    }
+    impl_->hasFirstTimestamp = false;
+    impl_->firstTimestampOffset = 0;
+}
+
+CoreStatus CoreVideoDecoder::drainBeforeFallback(std::vector<RawVideoFrame>& drainedFrames) {
+    if (!impl_ || !impl_->isReady()) {
+        return CoreStatus::NotInitialized;
+    }
+    drainedFrames.clear();
+    if (impl_->hwBackend == HwDecodeBackend::None) {
+        return CoreStatus::Ok;
+    }
+    impl_->drainPendingFrames(*this, drainedFrames);
+    return impl_->fallbackToCpu();
+}
+
+HwDecodeBackend CoreVideoDecoder::activeBackend() const noexcept {
+    if (!impl_) {
+        return HwDecodeBackend::None;
+    }
+    return impl_->hwBackend;
+}
+
+bool CoreVideoDecoder::isHardwareActive() const noexcept {
+    return activeBackend() != HwDecodeBackend::None;
+}
+
+const std::string& CoreVideoDecoder::lastDiagnosticMessage() const noexcept {
+    static const std::string kEmptyMsg;
+    if (!impl_) {
+        return kEmptyMsg;
+    }
+    return impl_->diagnosticMessage;
 }
 
 } // namespace openmedia
