@@ -66,6 +66,9 @@ public:
 
     /// @brief Returns the canonical 5-job AME test matrix (MKV AV1, WebM VP9, MKV 4:4:4, Opus, FLAC).
     [[nodiscard]] static std::vector<AmeExportJob> defaultBatchMatrix();
+
+    /// @brief Validates default Config.toml Dual-PRM & decode policy keys.
+    [[nodiscard]] static bool validateConfigTomlPolicy(const std::string& tomlContent) noexcept;
 };
 
 } // namespace openmedia::integration
