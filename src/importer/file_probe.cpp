@@ -1,16 +1,18 @@
 /// @file file_probe.cpp
-/// @brief Implementation of FileProbe for imOpenFile8 and imGetInfo8.
+/// @brief Implementation of FileProbe, OpenMediaConfig (Config.toml), FilenameModifiers, and ErrorDeduplicator.
 
 #include "importer/file_probe.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
 
 namespace openmedia::importer {
 namespace {
 
-/// @brief Appends a Unicode code point encoded as UTF-8 to the output string.
 void appendCodePointUtf8(uint32_t cp, std::string& out) {
     if (cp <= 0x7FU) {
         out.push_back(static_cast<char>(cp));
@@ -33,17 +35,14 @@ void appendCodePointUtf8(uint32_t cp, std::string& out) {
     out.push_back(static_cast<char>(0x80U | (cp & 0x3FU)));
 }
 
-/// @brief Checks whether a UTF-16 code unit is a high surrogate (0xD800..0xDBFF).
 bool isHighSurrogate(char16_t unit) noexcept {
     return unit >= 0xD800U && unit <= 0xDBFFU;
 }
 
-/// @brief Checks whether a UTF-16 code unit is a low surrogate (0xDC00..0xDFFF).
 bool isLowSurrogate(char16_t unit) noexcept {
     return unit >= 0xDC00U && unit <= 0xDFFFU;
 }
 
-/// @brief Decodes the next Unicode code point from UTF-16, advancing index past any surrogate pair.
 uint32_t decodeNextCodePoint(const std::u16string& utf16, size_t& index) noexcept {
     const char16_t unit = utf16[index];
     if (isHighSurrogate(unit) && (index + 1U) < utf16.size() && isLowSurrogate(utf16[index + 1U])) {
@@ -58,16 +57,37 @@ uint32_t decodeNextCodePoint(const std::u16string& utf16, size_t& index) noexcep
     return static_cast<uint32_t>(unit);
 }
 
-/// @brief Normalizes a file extension by stripping a leading dot and lowercasing ASCII characters.
-std::string normalizeExtension(const std::string& ext) {
-    std::string clean = (!ext.empty() && ext.front() == '.') ? ext.substr(1U) : ext;
-    std::transform(clean.begin(), clean.end(), clean.begin(), [](unsigned char ch) {
+std::string toLowerAscii(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
-    return clean;
+    return value;
 }
 
-/// @brief Extracts the lowercase file extension from a UTF-8 path.
+std::string trimWhitespace(const std::string& s) {
+    const size_t first = s.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) {
+        return "";
+    }
+    const size_t last = s.find_last_not_of(" \t\r\n");
+    return s.substr(first, last - first + 1U);
+}
+
+std::string stripQuotes(const std::string& s) {
+    if (s.size() >= 2U && ((s.front() == '"' && s.back() == '"') || (s.front() == '\'' && s.back() == '\''))) {
+        return s.substr(1U, s.size() - 2U);
+    }
+    return s;
+}
+
+std::string normalizeExtension(const std::string& ext) {
+    std::string clean = stripQuotes(trimWhitespace(ext));
+    if (!clean.empty() && clean.front() == '.') {
+        clean.erase(clean.begin());
+    }
+    return toLowerAscii(clean);
+}
+
 std::string extractExtension(const std::string& path) {
     const size_t slashPos = path.find_last_of("/\\");
     const size_t dotPos = path.find_last_of('.');
@@ -77,7 +97,203 @@ std::string extractExtension(const std::string& path) {
     return normalizeExtension(path.substr(dotPos + 1U));
 }
 
-/// @brief Returns true if the codec requires OpenMedia Importer rather than native Adobe fallback.
+std::string stripTomlComment(const std::string& line) {
+    bool inQuote = false;
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] == '"') {
+            inQuote = !inQuote;
+        } else if (line[i] == '#' && !inQuote) {
+            return line.substr(0, i);
+        }
+    }
+    return line;
+}
+
+bool parseBoolToken(const std::string& val, bool fallback) {
+    const std::string low = toLowerAscii(trimWhitespace(val));
+    if (low == "true" || low == "1") {
+        return true;
+    }
+    if (low == "false" || low == "0") {
+        return false;
+    }
+    return fallback;
+}
+
+uint32_t parseUintToken(const std::string& val, uint32_t fallback) {
+    try {
+        const long long parsed = std::stoll(trimWhitespace(val));
+        return (parsed >= 0) ? static_cast<uint32_t>(parsed) : fallback;
+    } catch (...) {
+        return fallback;
+    }
+}
+
+std::vector<std::string> parseExtensionArray(const std::string& val) {
+    std::vector<std::string> out;
+    const size_t lb = val.find('[');
+    const size_t rb = val.rfind(']');
+    if (lb == std::string::npos || rb == std::string::npos || rb <= lb) {
+        return out;
+    }
+    std::istringstream iss(val.substr(lb + 1U, rb - lb - 1U));
+    std::string item;
+    while (std::getline(iss, item, ',')) {
+        const std::string norm = normalizeExtension(item);
+        if (!norm.empty()) {
+            out.push_back(norm);
+        }
+    }
+    return out;
+}
+
+GpuDecodeMode parseGpuMode(const std::string& val) {
+    const std::string clean = toLowerAscii(stripQuotes(trimWhitespace(val)));
+    if (clean == "available") {
+        return GpuDecodeMode::Available;
+    }
+    if (clean == "disabled") {
+        return GpuDecodeMode::Disabled;
+    }
+    return GpuDecodeMode::Recommended;
+}
+
+ThumbnailTimecodeMode parseThumbTimecodeMode(const std::string& val) {
+    const std::string clean = toLowerAscii(stripQuotes(trimWhitespace(val)));
+    if (clean == "hide_when_zero") {
+        return ThumbnailTimecodeMode::HideWhenZero;
+    }
+    if (clean == "always_hide") {
+        return ThumbnailTimecodeMode::AlwaysHide;
+    }
+    return ThumbnailTimecodeMode::AlwaysShow;
+}
+
+DurationCalculationMode parseDurationMode(const std::string& val) {
+    const std::string clean = toLowerAscii(stripQuotes(trimWhitespace(val)));
+    if (clean == "frame_timestamp") {
+        return DurationCalculationMode::FrameTimestamp;
+    }
+    return DurationCalculationMode::Metadata;
+}
+
+void applyBoolOrIntConfig(const std::string& key, const std::string& val, OpenMediaConfig& cfg) {
+    struct BoolField { const char* name; bool OpenMediaConfig::* ptr; };
+    static constexpr std::array<BoolField, 6> kBoolFields = {{
+        {"disable", &OpenMediaConfig::disable},
+        {"overrideadobe", &OpenMediaConfig::overrideAdobe},
+        {"disableautomaticoverride", &OpenMediaConfig::disableAutomaticOverride},
+        {"reducewarnings", &OpenMediaConfig::reduceWarnings},
+        {"disableseekingtable", &OpenMediaConfig::disableSeekingTable},
+        {"disablethumbnailcache", &OpenMediaConfig::disableThumbnailCache},
+    }};
+    for (const auto& f : kBoolFields) {
+        if (key == f.name) {
+            cfg.*(f.ptr) = parseBoolToken(val, cfg.*(f.ptr));
+            return;
+        }
+    }
+    if (key == "maxframecachesizemb") cfg.maxFrameCacheSizeMB = parseUintToken(val, cfg.maxFrameCacheSizeMB);
+    if (key == "maxpercentusageavailablememory") cfg.maxPercentUsageAvailableMemory = parseUintToken(val, cfg.maxPercentUsageAvailableMemory);
+}
+
+void applyConfigKeyValue(const std::string& rawKey, const std::string& val, OpenMediaConfig& cfg) {
+    const std::string key = toLowerAscii(trimWhitespace(rawKey));
+    if (key == "overrideextensions") {
+        cfg.overrideExtensions = parseExtensionArray(val);
+        return;
+    }
+    if (key == "gpudecodemode") {
+        cfg.gpuDecodeMode = parseGpuMode(val);
+        return;
+    }
+    if (key == "thumbnailtimecode") {
+        cfg.thumbnailTimecode = parseThumbTimecodeMode(val);
+        return;
+    }
+    if (key == "durationcalculation") {
+        cfg.durationCalculation = parseDurationMode(val);
+        return;
+    }
+    applyBoolOrIntConfig(key, val, cfg);
+}
+
+int32_t parseIntSafe(const std::string& s, int32_t fallback) {
+    try {
+        return std::stoi(s);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+openmedia::RationalTime parseFrameRateToken(const std::string& val) {
+    const size_t dPos = val.find('d');
+    if (dPos != std::string::npos) {
+        const int32_t num = parseIntSafe(val.substr(0, dPos), 0);
+        const int32_t den = parseIntSafe(val.substr(dPos + 1U), 1);
+        return openmedia::RationalTime::sanitize(num, den);
+    }
+    const int32_t num = parseIntSafe(val, 0);
+    return openmedia::RationalTime{num, 1};
+}
+
+std::string normalizePixelFormatToken(const std::string& raw) {
+    const std::string low = toLowerAscii(raw);
+    static constexpr std::array<const char*, 7> kAllowed = {
+        "argb", "bgra", "bgra64", "yuv420p", "yuv420p10u", "uyvy422", "vuya"
+    };
+    for (const char* fmt : kAllowed) {
+        if (low == fmt) {
+            return low;
+        }
+    }
+    return "";
+}
+
+void applyIntModifier(const std::string& key, const std::string& val, FilenameModifiers& out) {
+    if (key == "w") out.width = std::max(0, parseIntSafe(val, out.width));
+    if (key == "h") out.height = std::max(0, parseIntSafe(val, out.height));
+    if (key == "vs") out.videoStreamIndex = parseIntSafe(val, out.videoStreamIndex);
+    if (key == "as") out.audioStreamIndex = parseIntSafe(val, out.audioStreamIndex);
+}
+
+void applyColorAndFlagModifier(const std::string& key, const std::string& val, FilenameModifiers& out) {
+    if (key == "cr" || key == "color_range") {
+        const std::string lowVal = toLowerAscii(val);
+        out.colorRange = (lowVal == "full") ? openmedia::ColorRange::Full
+                       : (lowVal == "limited") ? openmedia::ColorRange::Limited : out.colorRange;
+        return;
+    }
+    if (key == "accurate_duration") out.accurateDuration = true;
+    if ((key == "rft" || key == "reset_first_timestamp") && (val.empty() || val == "1")) {
+        out.resetFirstTimestamp = true;
+    }
+}
+
+void applyModifierToken(const std::string& token, FilenameModifiers& out) {
+    const size_t eq = token.find('=');
+    const std::string key = toLowerAscii(eq == std::string::npos ? token : token.substr(0, eq));
+    const std::string val = (eq == std::string::npos) ? "" : token.substr(eq + 1U);
+    applyIntModifier(key, val, out);
+    applyColorAndFlagModifier(key, val, out);
+    if (key == "pf" || key == "pixel_format") {
+        const std::string pf = normalizePixelFormatToken(val);
+        if (!pf.empty()) out.pixelFormat = pf;
+    }
+    if (key == "fr" || key == "frame_rate") out.frameRate = parseFrameRateToken(val);
+}
+
+std::string stripVirtualSuffix(const std::string& path) {
+    const std::string low = toLowerAscii(path);
+    if (low.size() > 7U && low.substr(low.size() - 7U) == ".influx") {
+        return path.substr(0, path.size() - 7U);
+    }
+    if (low.size() > 10U && low.substr(low.size() - 10U) == ".openmedia") {
+        return path.substr(0, path.size() - 10U);
+    }
+    return path;
+}
+
 bool isPluginModernCodec(CodecId codec) noexcept {
     constexpr std::array<CodecId, 6> kModernCodecs{
         CodecId::AV1, CodecId::VP9, CodecId::VP8,
@@ -86,7 +302,6 @@ bool isPluginModernCodec(CodecId codec) noexcept {
     return std::find(kModernCodecs.begin(), kModernCodecs.end(), codec) != kModernCodecs.end();
 }
 
-/// @brief Finds the first stream matching the requested MediaType, or nullptr if none exists.
 const StreamInfo* findFirstStream(const std::vector<StreamInfo>& streams, MediaType type) noexcept {
     for (const auto& stream : streams) {
         if (stream.type == type) {
@@ -96,7 +311,6 @@ const StreamInfo* findFirstStream(const std::vector<StreamInfo>& streams, MediaT
     return nullptr;
 }
 
-/// @brief Populates video stream fields and sanitized rational timebase on ImFileInfoRec8Ext.
 void populateVideoStreamInfo(const StreamInfo& video, ImFileInfoRec8Ext& infoRec) noexcept {
     infoRec.hasVideo = kPrTrueVal;
     infoRec.vidInfo.imageWidth = video.width;
@@ -112,7 +326,6 @@ void populateVideoStreamInfo(const StreamInfo& video, ImFileInfoRec8Ext& infoRec
     infoRec.vidSampleSize = (rawNum > 0) ? static_cast<csSDK_int32>(safeDen) : 1;
 }
 
-/// @brief Populates audio stream fields on ImFileInfoRec8Ext.
 void populateAudioStreamInfo(const StreamInfo& audio, ImFileInfoRec8Ext& infoRec) noexcept {
     infoRec.hasAudio = kPrTrueVal;
     infoRec.audSampleRate = (audio.sampleRate > 0) ? static_cast<double>(audio.sampleRate) : 48000.0;
@@ -121,6 +334,113 @@ void populateAudioStreamInfo(const StreamInfo& audio, ImFileInfoRec8Ext& infoRec
 }
 
 } // namespace
+
+OpenMediaConfig OpenMediaConfig::parseConfigToml(const std::string& tomlContent) {
+    OpenMediaConfig cfg;
+    std::istringstream stream(tomlContent);
+    std::string line;
+    while (std::getline(stream, line)) {
+        const std::string clean = trimWhitespace(stripTomlComment(line));
+        const size_t eq = clean.find('=');
+        if (clean.empty() || clean.front() == '[' || eq == std::string::npos) {
+            continue;
+        }
+        applyConfigKeyValue(clean.substr(0, eq), clean.substr(eq + 1U), cfg);
+    }
+    return cfg;
+}
+
+std::string OpenMediaConfig::resolveDefaultConfigPath() {
+#ifdef _WIN32
+    const char* appData = std::getenv("APPDATA");
+    const std::string base = (appData != nullptr) ? appData : ".";
+    return base + "\\OpenMedia\\Config.toml";
+#else
+    const char* home = std::getenv("HOME");
+    const std::string base = (home != nullptr) ? home : ".";
+    return base + "/.config/OpenMedia/Config.toml";
+#endif
+}
+
+OpenMediaConfig OpenMediaConfig::loadDefaultConfig() {
+    std::ifstream ifs(resolveDefaultConfigPath());
+    if (!ifs.is_open()) {
+        return OpenMediaConfig{};
+    }
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    return parseConfigToml(oss.str());
+}
+
+bool OpenMediaConfig::isExtensionOverridden(const std::string& ext) const {
+    const std::string norm = normalizeExtension(ext);
+    return std::find(overrideExtensions.begin(), overrideExtensions.end(), norm) != overrideExtensions.end();
+}
+
+FilenameModifiers FilenameModifiers::parseFilenameModifiers(const std::string& path) {
+    FilenameModifiers mods;
+    const std::string basePath = stripVirtualSuffix(path);
+    const size_t slashPos = basePath.find_last_of("/\\");
+    const size_t dotPos = basePath.find_last_of('.');
+    const size_t searchFrom = (slashPos == std::string::npos) ? 0U : (slashPos + 1U);
+    const size_t bangPos = basePath.find('!', searchFrom);
+    if (bangPos == std::string::npos || (slashPos != std::string::npos && bangPos < slashPos)) {
+        mods.cleanPath = basePath;
+        return mods;
+    }
+
+    const size_t modEnd = (dotPos != std::string::npos && dotPos > bangPos) ? dotPos : basePath.size();
+    const std::string extPart = (dotPos != std::string::npos && dotPos > bangPos) ? basePath.substr(dotPos) : "";
+    mods.cleanPath = basePath.substr(0, bangPos) + extPart;
+
+    std::istringstream iss(basePath.substr(bangPos + 1U, modEnd - bangPos - 1U));
+    std::string token;
+    while (std::getline(iss, token, '!')) {
+        if (!token.empty()) {
+            applyModifierToken(token, mods);
+        }
+    }
+    return mods;
+}
+
+void FilenameModifiers::resolveAspectRatio(int32_t srcWidth,
+                                           int32_t srcHeight,
+                                           int32_t& ioWidth,
+                                           int32_t& ioHeight) noexcept {
+    if (srcWidth <= 0 || srcHeight <= 0) {
+        return;
+    }
+    if (ioWidth > 0 && ioHeight <= 0) {
+        ioHeight = static_cast<int32_t>((static_cast<int64_t>(ioWidth) * srcHeight) / srcWidth);
+        return;
+    }
+    if (ioHeight > 0 && ioWidth <= 0) {
+        ioWidth = static_cast<int32_t>((static_cast<int64_t>(ioHeight) * srcWidth) / srcHeight);
+    }
+}
+
+bool ErrorDeduplicator::shouldLogWarning(const std::string& fileInstanceKey,
+                                         const std::string& warningKey,
+                                         bool reduceWarnings) {
+    if (!reduceWarnings) {
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    return seenWarnings_.insert(fileInstanceKey + "::" + warningKey).second;
+}
+
+void ErrorDeduplicator::clearFile(const std::string& fileInstanceKey) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const std::string prefix = fileInstanceKey + "::";
+    for (auto it = seenWarnings_.begin(); it != seenWarnings_.end();) {
+        it = (it->compare(0, prefix.size(), prefix) == 0) ? seenWarnings_.erase(it) : std::next(it);
+    }
+}
+
+void ErrorDeduplicator::clearAll() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    seenWarnings_.clear();
+}
 
 std::string FileProbe::utf16ToUtf8(const std::u16string& utf16) {
     std::string out;
@@ -143,10 +463,14 @@ bool FileProbe::shouldDelegateToNative(const std::vector<StreamInfo>& streams, c
 
 csSDK_int32 FileProbe::openAndProbe(ImOpenFileRec8Ext& openRec, ICoreDemuxer& demuxer) {
     const std::string utf8Path = utf16ToUtf8(openRec.fileinfo.filepath);
-    if (utf8Path.empty() || demuxer.openFile(utf8Path) != CoreStatus::Ok) {
+    if (utf8Path.empty()) {
         return kImBadFile;
     }
-    const std::string ext = extractExtension(utf8Path);
+    const FilenameModifiers mods = FilenameModifiers::parseFilenameModifiers(utf8Path);
+    if (demuxer.openFile(mods.cleanPath) != CoreStatus::Ok) {
+        return kImBadFile;
+    }
+    const std::string ext = extractExtension(mods.cleanPath);
     if (shouldDelegateToNative(demuxer.getStreams(), ext)) {
         demuxer.close();
         return kImBadFile;

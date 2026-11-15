@@ -1,39 +1,114 @@
 #pragma once
 /// @file file_probe.hpp
-/// @brief File probing, UTF-16 path conversion, native Adobe delegation, and rational timebase mapping.
+/// @brief File probing, OpenMediaConfig (Config.toml), FilenameModifiers (!), and ErrorDeduplicator.
 
 #include "PrSDKPixelFormat.h"
 #include "importer/importer_types.hpp"
 
+#include <cstdint>
+#include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace openmedia::importer {
 
+/// @brief GPU decode policy mode configured in Config.toml.
+enum class GpuDecodeMode : uint8_t {
+    Recommended = 0,
+    Available,
+    Disabled
+};
+
+/// @brief Thumbnail timecode display behavior configured in Config.toml.
+enum class ThumbnailTimecodeMode : uint8_t {
+    AlwaysShow = 0,
+    HideWhenZero,
+    AlwaysHide
+};
+
+/// @brief Duration calculation mode configured in Config.toml.
+enum class DurationCalculationMode : uint8_t {
+    Metadata = 0,
+    FrameTimestamp
+};
+
+/// @brief Parsed Config.toml settings for OpenMedia Importer.
+struct OpenMediaConfig {
+    bool disable = false;
+    bool overrideAdobe = false;
+    std::vector<std::string> overrideExtensions;
+    bool disableAutomaticOverride = false;
+    bool reduceWarnings = false;
+    GpuDecodeMode gpuDecodeMode = GpuDecodeMode::Recommended;
+    uint32_t maxFrameCacheSizeMB = 400;
+    uint32_t maxPercentUsageAvailableMemory = 50;
+    bool disableSeekingTable = false;
+    bool disableThumbnailCache = false;
+    ThumbnailTimecodeMode thumbnailTimecode = ThumbnailTimecodeMode::AlwaysShow;
+    DurationCalculationMode durationCalculation = DurationCalculationMode::Metadata;
+
+    /// @brief Parses Config.toml content into an OpenMediaConfig struct.
+    static OpenMediaConfig parseConfigToml(const std::string& tomlContent);
+
+    /// @brief Resolves the default platform Config.toml path (%APPDATA%/OpenMedia/Config.toml or ~/.config/OpenMedia/Config.toml).
+    static std::string resolveDefaultConfigPath();
+
+    /// @brief Loads Config.toml from the default platform path, returning defaults if absent.
+    static OpenMediaConfig loadDefaultConfig();
+
+    /// @brief Checks whether an extension (e.g. ".mkv" or "MKV") is in overrideExtensions (case-insensitive).
+    bool isExtensionOverridden(const std::string& ext) const;
+};
+
+/// @brief Parsed per-file overrides after the last '!' before the extension.
+struct FilenameModifiers {
+    int32_t width = 0;
+    int32_t height = 0;
+    int32_t videoStreamIndex = -1;
+    int32_t audioStreamIndex = -1;
+    std::string pixelFormat;
+    openmedia::RationalTime frameRate{0, 1};
+    openmedia::ColorRange colorRange = openmedia::ColorRange::Unspecified;
+    bool accurateDuration = false;
+    bool resetFirstTimestamp = false;
+    std::string cleanPath;
+
+    /// @brief Parses filename suffix modifiers after the last '!' before the extension (including .influx / .openmedia).
+    static FilenameModifiers parseFilenameModifiers(const std::string& path);
+
+    /// @brief Resolves missing width or height while preserving source aspect ratio.
+    static void resolveAspectRatio(int32_t srcWidth,
+                                   int32_t srcHeight,
+                                   int32_t& ioWidth,
+                                   int32_t& ioHeight) noexcept;
+};
+
+/// @brief Suppresses repeated per-frame error/warning logs for the same file instance.
+class ErrorDeduplicator {
+public:
+    /// @brief Returns true if the warning should be logged; suppresses duplicates when reduceWarnings is true.
+    bool shouldLogWarning(const std::string& fileInstanceKey,
+                          const std::string& warningKey,
+                          bool reduceWarnings);
+
+    /// @brief Clears tracked warning state for a closed file instance.
+    void clearFile(const std::string& fileInstanceKey);
+
+    /// @brief Clears all tracked warnings.
+    void clearAll();
+
+private:
+    std::mutex mutex_;
+    std::unordered_set<std::string> seenWarnings_;
+};
+
 /// @brief Handles imOpenFile8 probing, native format delegation, and imGetInfo8 population.
 class FileProbe {
 public:
-    /// @brief Converts a UTF-16 path string (BMP and surrogate pairs) into UTF-8.
-    /// @param utf16 Input UTF-16 string.
-    /// @return UTF-8 encoded string; unpaired surrogates are replaced with U+FFFD.
     static std::string utf16ToUtf8(const std::u16string& utf16);
-
-    /// @brief Determines whether a container should be delegated back to Adobe's native importer.
-    /// @param streams Discovered streams from the demuxer.
-    /// @param ext File extension (with or without leading dot, case-insensitive).
-    /// @return True for .mp4/.mov containers that contain no modern plugin codecs (AV1/VP9/VP8/Opus/FLAC/Vorbis).
     static bool shouldDelegateToNative(const std::vector<StreamInfo>& streams, const std::string& ext);
-
-    /// @brief Opens a media file via ICoreDemuxer and checks for native delegation.
-    /// @param openRec Extended imOpenFileRec8 structure containing the UTF-16 filepath.
-    /// @param demuxer Demuxer instance used to open and probe container streams.
-    /// @return kImNoErr on success, or kImBadFile on open failure or native delegation.
     static csSDK_int32 openAndProbe(ImOpenFileRec8Ext& openRec, ICoreDemuxer& demuxer);
-
-    /// @brief Populates ImFileInfoRec8Ext capabilities, rational video timebase, and audio metadata.
-    /// @param streams Discovered container streams.
-    /// @param infoRec Extended imFileInfoRec8 structure to populate.
-    /// @return kImNoErr on success, or kImBadFile if no streams are present.
     static csSDK_int32 populateFileInfo(const std::vector<StreamInfo>& streams, ImFileInfoRec8Ext& infoRec);
 };
 
