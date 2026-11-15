@@ -172,3 +172,7 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete packaging and licensing documentation | `THIRD_PARTY_LICENSES.md` verified | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 Dual-PRM Bundle, `Config.toml` Deployment & VC++ Redistributable Guard
+- **`unit-1` (`Windows Installer`)**: Bundles `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`, and default `Config.toml`, and verifies `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll` presence with a clear guidance prompt if Microsoft Visual C++ Redistributable is missing.
+- **`unit-2` (`macOS Installer`)**: Bundles `OpenMedia_Importer.bundle`, `OpenMedia_ImporterHP.bundle`, `OpenMedia_Exporter.bundle`, and `libOpenMediaCore.dylib` with Apple Silicon (`arm64` VideoToolbox) support.

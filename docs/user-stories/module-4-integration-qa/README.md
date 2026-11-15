@@ -99,3 +99,12 @@ public:
 1. **US-4.1.0**: Units `unit-1..3` merge cascadingly into `feat/us-4.1.0-mediacore-host-integration-harness` $\to$ Gate G0..G-Review $\to$ `feat/module-4-integration-qa`.
 2. **US-4.2.0**: Units `unit-1..3` merge cascadingly into `feat/us-4.2.0-cpack-distribution-packaging` $\to$ Gate G0..G-Review $\to$ `feat/module-4-integration-qa`.
 3. **Module 4 Promotion**: Module Leader runs the complete integration, benchmark, and CPack packaging verification suite and merges `feat/module-4-integration-qa` into `main`.
+
+---
+
+## 5. Influx v1.7.1 & v2.0.0 Beta 1 QA & Packaging Enhancements
+
+1. **Dual-PRM (`OpenMedia_Importer.prm` + `OpenMedia_ImporterHP.prm`) & GPU Policy Verification (`US-4.1.0`)**:
+   - Validates simultaneous loading of both normal (`0x00`) and high-priority (`0x01`) importer shims, verifies `evaluateDecodePolicy()` ($2560 \times 1600$ resolution threshold and 4-stream GPU concurrency cap), tests `!` filename modifiers, and verifies final-frame retention in WebM/AV1 clips.
+2. **Dual-PRM + `Config.toml` Packaging & Visual C++ Redistributable Check (`US-4.2.0`)**:
+   - Packages `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`/`.dylib`, and default `Config.toml` into the installers, and checks for `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll` during installation on Windows.

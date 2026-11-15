@@ -217,3 +217,7 @@ AV1/
 | **Gate G-Complexity** | Complexity | All scripts/tests $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete build and toolchain documentation | Doxygen / CMake docs | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 Build & Shim Enhancements
+- **Dual-PRM Target Generation (`unit-1`)**: `CMakeLists.txt` generates both `OpenMedia_Importer` (`isHighPriority = 0`) and `OpenMedia_ImporterHP` (`isHighPriority = 1`, `OPENMEDIA_HIGH_PRIORITY_SHIM=1`) alongside `OpenMedia_Exporter` and `OpenMediaCore`.
+- **Release Optimization & Memory Protection (`unit-1`)**: Enables `CMAKE_INTERPROCEDURAL_OPTIMIZATION` (LTCG) in Release mode, `AVX2`/`SSE4.1` SIMD instruction sets, and Windows linker protections (`/DYNAMICBASE`, `/NXCOMPAT`, `/HIGHENTROPYVA`).

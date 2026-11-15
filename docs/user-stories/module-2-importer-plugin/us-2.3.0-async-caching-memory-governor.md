@@ -232,3 +232,13 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 6 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 Smart GPU Decode Policy, 4-Stream Cap & SQLite Thumbnail Cache
+- **`unit-2` (`PPixCacheBridge`)**: Adds persistent SQLite 3 `STRICT` Thumbnail Cache (`CREATE TABLE IF NOT EXISTS tableVersion (name TEXT PRIMARY KEY, version INTEGER NOT NULL) STRICT;` and `CREATE TABLE IF NOT EXISTS thumbnails (id INTEGER PRIMARY KEY, path TEXT NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, frame INTEGER NOT NULL, created INTEGER NOT NULL, data BLOB NOT NULL) STRICT;`) controlled by `disableThumbnailCache` and `thumbnailTimecode` in `Config.toml`.
+- **`unit-3` (`KeyframeRingBuffer`)**: Enhances Long-GOP and open-GOP seeking (AVCHD/MTS, Canon C70 MXF, H.264/HEVC, AV1) so timeline scrubs decode the exact target frame rather than an adjacent frame.
+- **`unit-4` (`MemoryGovernor`)**: Enforces `maxFrameCacheSizeMB` (default `400` MB) and `maxPercentUsageAvailableMemory` (default `50%` of available system RAM) from `Config.toml`.
+- **`unit-5` & `unit-6` (`D3D11VaNvdecDecoder` & `VulkanVideoDecoder`)**: Implement `evaluateDecodePolicy()`:
+  - Supports `gpuDecodeMode` (`"recommended"`, `"available"`, `"disabled"`).
+  - In `"recommended"` mode, requires resolution $\ge 2560 \times 1600$ ($4\text{ MP}$) and supported profiles (H.264/HEVC/AV1/VP9 4:2:0 `BT.709` on Windows NVIDIA `NVDEC` GTX 1650 / RTX 2000..5000+, or Apple Silicon M1+ `VideoToolbox` on macOS 12+).
+  - Enforces a hard cap of **4 concurrent GPU-decoded videos** per Adobe host application; the 5th+ video automatically decodes on CPU.
+  - Executes `drainBeforeFallback()` on GPU error, emits at most one driver warning per Adobe session, and exposes per-video GPU/CPU status and fallback reason for the `GPU Status` panel.

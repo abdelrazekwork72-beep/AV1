@@ -200,3 +200,9 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete selector lifecycle Doxygen docs | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 Registration, `Config.toml` & `!` Modifiers Specifications
+- **`unit-1` (`ImporterEntry`)**: Implements `xOpenMediaImportEntry(selector, stdParms, param1, param2, bool isHighPriority)` supporting both normal-priority (`0x00`) and high-priority override (`0x01`) `.prm` shims, plus per-file error log deduplication (`reduceWarnings`).
+- **`unit-2` (`IMPT & PiPL Resources`)**: Registers `"OpenMedia Importer"` for `OpenMedia_Importer.prm` and `"OpenMedia Importer "` (with trailing space) for `OpenMedia_ImporterHP.prm`.
+- **`unit-3` (`FileProbe`)**: Parses `%APPDATA%\OpenMedia\Config.toml` (`overrideAdobe`, `overrideExtensions` case-insensitive with/without leading dot, `gpuDecodeMode`, `durationCalculation`) and filename suffix modifiers after the last `!` (`!w=`, `!h=`, `!vs=`, `!as=`, `!pf=`, `!fr=24000d1001`, `!cr=full|limited`, `!accurate_duration`, `!rft=1`), and rejects undecodable video files with `"No decodable video frames in file"`.
+- **`unit-4` (`StreamTracker`)**: Supports explicit stream filtering via `!vs=<index>` and `!as=<index>` (e.g., GoPro MAX 360 dual video streams) and expanded container formats (`MKV`, `WebM`, `MP4`, `MOV`, `AVI`, `FLV`, `BIK`/`BK2`, `OGG`, `TS`, `VOB`, `MXF`, `Y4M`, `QOI`, `APNG`, `WAV`, `AIFF`, `FLAC`, `Opus`, `AAC`, `MP3`, `AC3`, `DTS`).

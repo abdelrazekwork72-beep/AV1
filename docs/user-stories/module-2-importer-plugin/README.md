@@ -179,3 +179,20 @@ public:
 3. **US-2.3.0**: Units `unit-1..6` merge cascadingly into `feat/us-2.3.0-async-caching-memory-governor` $\to$ Gate G0..G-Review $\to$ `feat/module-2-importer-plugin`.
 4. **US-2.4.0**: Units `unit-1..5` merge cascadingly into `feat/us-2.4.0-zero-conform-audio-pipeline` $\to$ Gate G0..G-Review $\to$ `feat/module-2-importer-plugin`.
 5. **Module 2 Promotion**: Module Leader runs all 20 importer unit tests under ASan/TSan and merges `feat/module-2-importer-plugin` into `main`.
+
+---
+
+## 5. Influx v1.7.1 & v2.0.0 Beta 1 Importer Enhancements
+
+1. **Dual-PRM Shim (`OpenMedia_Importer.prm` & `OpenMedia_ImporterHP.prm`) & PiPL Trailing-Space Trick (`US-2.1.0`)**:
+   - `OpenMedia_Importer.prm` passes `isHighPriority = false` (`0x00`) with PiPL name `"OpenMedia Importer"` (normal fallback priority).
+   - `OpenMedia_ImporterHP.prm` passes `isHighPriority = true` (`0x01`) with PiPL name `"OpenMedia Importer "` (trailing space) and `priority = 100` to override built-in Adobe importers when configured.
+2. **`Config.toml` & `!` Filename Suffix Modifiers (`US-2.1.0`)**:
+   - Parses `%APPDATA%\OpenMedia\Config.toml` (`disable`, `overrideAdobe`, `overrideExtensions`, `disableAutomaticOverride`, `debugLogs`, `reduceWarnings`, `disableMultithreading`, `disableFrameCache`, `maxFrameCacheSizeMB = 400`, `maxPercentUsageAvailableMemory = 50`, `disableSeekingTable`, `disableThumbnailCache`, `thumbnailTimecode`, `maxLogFileSizeMB = 50`, `durationCalculation`, `gpuDecodeMode`).
+   - Parses per-file suffix modifiers after the last `!` in filenames: `!w=`, `!h=` (auto aspect ratio), `!vs=`, `!as=` (GoPro MAX 360 stream selection), `!pf=` / `!pixel_format=`, `!fr=` / `!frame_rate=` (e.g. `24000d1001`), `!cr=full|limited`, `!accurate_duration`, and `!rft=1`.
+3. **Direct GPU Color Conversion & Camera Gamuts (`US-2.2.0`)**:
+   - Direct `NV12` / `P010LE` $\to$ `BGRA` conversion on GPU/SIMD and support for `sRGB`, `BT.601`, `BT.709`, `BT.2020`, `BT.2100 HLG/PQ`, `DCDM X'Y'Z'`, and Sony `SGamut/SLog2`, `SGamut3/SLog3`, `Cine/SLog3`.
+4. **Smart GPU Decode Policy (`evaluateDecodePolicy`), 4-Stream GPU Cap & SQLite `STRICT` Thumbnail Cache (`US-2.3.0`)**:
+   - Enforces resolution threshold ($\ge 2560 \times 1600$ in `"recommended"` mode), caps concurrent GPU-decoded streams at **4 per Adobe application** (routing the 5th+ to CPU), executes `drainBeforeFallback()` on GPU error with once-per-session warning deduplication, and stores Media Browser thumbnails in a local SQLite 3 `STRICT` database (`tableVersion` and `thumbnails` tables).
+5. **Fault-Tolerant Audio & 5/6-Channel MOV PCM (`US-2.4.0`)**:
+   - Supports `xHE-AAC`, corrupt packet silence substitution, silent track import, 5/6-channel MOV PCM, and up to 24/32 channels without locking files on Windows.

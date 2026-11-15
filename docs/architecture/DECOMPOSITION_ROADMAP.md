@@ -278,3 +278,40 @@ AV1/
 - **Gate G-Complexity (`cyclomatic-complexity`)**: Cyclomatic Complexity $CC \le 6$ target, $CC \le 10$ ceiling, $CC > 15$ hard blocker; nesting depth $\le 2$.
 - **Gate G-Docs**: 100% public C++ APIs documented with Doxygen comments and runnable unit test examples.
 - **Gate G-Review**: Formal review verdict posted to the GitHub PR conversation by the independent Reviewing Council President.
+
+---
+
+## 7. Influx v1.7.1 & v2.0.0 Beta 1 Parity & Superiority Specifications
+
+To ensure `OpenMedia` surpasses both **Autokroma Influx v1.7.1 (Stable CPU)** and **Influx v2.0.0 Beta 1 (GPU/HWA)** while remaining 100% open-source and providing native **Export** capabilities, all 4 modules enforce the following architectural upgrades:
+
+### 7.1 Dual-PRM Shim Architecture & Build Hardening (Module 1 & Module 2)
+- **Dual Importer Shims (`OpenMedia_Importer.prm` + `OpenMedia_ImporterHP.prm`)**:
+  - `OpenMedia_Importer.prm`: Normal-priority shim passing `isHighPriority = false` (`0x00`) to `xOpenMediaImportEntry`, registered in `PiPL` as `"OpenMedia Importer"`.
+  - `OpenMedia_ImporterHP.prm`: High-priority override shim passing `isHighPriority = true` (`0x01`, priority $\ge 100$) to `xOpenMediaImportEntry`, registered in `PiPL` with a trailing space (`"OpenMedia Importer "`) so Adobe Premiere Pro, Media Encoder, and After Effects load both importers simultaneously without name collision.
+- **Compiler & Linker Hardening**: Release builds enable Link-Time Code Generation (`LTCG` / `CMAKE_INTERPROCEDURAL_OPTIMIZATION`), SIMD vectorization (`AVX2` / `SSE4.1`), and Windows PE security flags (`/DYNAMICBASE` ASLR, `/NXCOMPAT` DEP, `/HIGHENTROPYVA`).
+
+### 7.2 Smart GPU Decode Policy Engine & Direct VRAM Color Conversion (Module 1 & Module 2)
+- **Smart Decode Policy (`evaluateDecodePolicy`)**:
+  - Supports three `gpuDecodeMode` states configured via `Config.toml` or UI: `"recommended"` (default), `"available"` (testing all media including AMD/Intel GPUs), and `"disabled"`.
+  - **Resolution Threshold**: In `"recommended"` mode, videos below $2560 \times 1600$ ($4\text{ MP}$) are decoded on CPU (`libdav1d` / `libvpx`) because GPU context initialization overhead exceeds CPU decode time on smaller resolutions.
+  - **4-Stream GPU Concurrency Cap**: Enforces a hard limit of **4 simultaneous GPU-decoded video streams** per Adobe host process (`kMaxConcurrentGpuDecoders = 4`); the 5th+ active video stream automatically routes to CPU to prevent VRAM exhaustion.
+  - **Hardware Backends & Graceful Fallback (`drainBeforeFallback`)**: Supports NVIDIA `NVDEC` / `D3D11VA` on Windows and `VideoToolbox` on Apple Silicon (M1+, macOS 12+). On any hardware fault or outdated driver, `drainBeforeFallback()` flushes the GPU pipeline, logs at most one warning per Adobe session, and falls back to CPU with zero dropped or black frames.
+- **Direct GPU Color Conversion**: Converts hardware `NV12` (8-bit) and `P010LE` (10-bit) surfaces directly to `BGRA` / `RGB444_10U` in GPU/SIMD memory before transferring the final frame to Premiere Pro, eliminating PCIe bus bottlenecks.
+
+### 7.3 Video Timestamp Normalization, WebM Final-Frame Fix & Long-GOP Seeking (Module 1 & Module 2)
+- **WebM / VP9 / AV1 Final-Frame Retention**: Drains trailing decoder frames at EOF so the last frame of WebM/MKV files (including Chrome screen recordings and YouTube downloads) is never dropped.
+- **Non-Zero Start Time Normalization**: If a video stream's first timestamp starts after time zero (`start_time > 0` or `!rft=1`), frame 0 is normalized to the first actual image in the clip.
+- **Corrupt / Empty Video Rejection**: Rejects media files containing zero decodable video frames at import time with `"No decodable video frames in file"` instead of hanging timeline rendering or export queues.
+- **Exact Long-GOP & Open-GOP Seeking**: Accurate keyframe/GOP index lookahead for AVCHD/MTS, Canon C70 MXF, H.264/HEVC open-GOP, and AV1 streams so scrubbing lands on the exact requested frame rather than an adjacent frame.
+
+### 7.4 Fault-Tolerant Audio, `xHE-AAC` & 5/6-Channel MOV PCM (Module 1 & Module 2)
+- **Extended Audio Codecs & Corrupt Packet Tolerance**: Supports `Opus`, `FLAC`, `Vorbis`, `xHE-AAC`, `AAC`, `MP3`, `AC3`, `DTS`, and `PCM`. Isolated corrupted audio packets are replaced with zero-filled 32-bit float planar silence (`0.0f`) instead of failing the whole file import.
+- **Silent Track Synthesis & MOV 5/6-Channel PCM**: Imports declared audio tracks containing zero audio packets as silence rather than rejecting them, supports 5-channel and 6-channel PCM in MOV containers (e.g., ARRI AMIRA ProRes), and supports up to 24/32 channels per stream.
+- **Immediate File Unlock on Audio Error**: Immediately closes OS file handles if audio probing or reading fails, preventing Windows file-locking issues while Adobe remains open.
+
+### 7.5 `Config.toml`, `!` Filename Suffix Modifiers, SQLite Thumbnail Cache & Out-of-Process IPC (Module 2, 3 & 4)
+- **Advanced Configuration (`%APPDATA%\OpenMedia\Config.toml`)**: Supports `disable`, `overrideAdobe`, `overrideExtensions` (case-insensitive, accepts `MKV` or `.mkv`), `disableAutomaticOverride`, `debugLogs`, `reduceWarnings`, `disableMultithreading`, `disableFrameCache`, `maxFrameCacheSizeMB = 400`, `maxPercentUsageAvailableMemory = 50`, `disableSeekingTable`, `disableThumbnailCache`, `thumbnailTimecode`, `maxLogFileSizeMB = 50`, `durationCalculation` (`"metadata"` / `"frame_timestamp"`), and `gpuDecodeMode`.
+- **Filename Suffix Modifiers (`!` Syntax)**: Parses per-file overrides after the last `!` in the filename: `!w=`, `!h=` (auto-preserving aspect ratio when one dimension is specified), `!vs=`, `!as=` (stream selection for dual-stream GoPro MAX 360 files), `!pf=` / `!pixel_format=` (`argb`, `bgra`, `bgra64`, `yuv420p`, `yuv420p10u`, `uyvy422`, `vuya`), `!fr=` / `!frame_rate=` (supporting fractional `d` notation such as `24000d1001`), `!cr=full|limited` / `!color_range=`, `!accurate_duration`, and `!rft=1` / `!reset_first_timestamp=1`.
+- **SQLite 3 `STRICT` Thumbnail Cache**: Persists decoded project thumbnails in a local SQLite 3 database with `STRICT` schema tables (`tableVersion` and `thumbnails`) to prevent UI freezes when browsing large media bins.
+- **Out-of-Process GUI & IPC (`--popup --owner HWND`)**: Communicates settings and live per-file `GPU Status` between the Adobe plugins and an isolated desktop helper process via `StdIn`/`StdOut` using `json:`-prefixed messages, preventing Qt GUI library conflicts inside Premiere Pro.

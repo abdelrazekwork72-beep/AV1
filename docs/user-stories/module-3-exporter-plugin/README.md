@@ -148,3 +148,11 @@ struct ExporterInstance {
 2. **US-3.2.0**: Units `unit-1..5` merge cascadingly into `feat/us-3.2.0-export-render-engine` $\to$ Gate G0..G-Review $\to$ `feat/module-3-exporter-plugin`.
 3. **US-3.3.0**: Units `unit-1..6` merge cascadingly into `feat/us-3.3.0-codecs-hardware-fallback` $\to$ Gate G0..G-Review $\to$ `feat/module-3-exporter-plugin`.
 4. **Module 3 Promotion**: Module Leader runs all 16 exporter unit tests and merges `feat/module-3-exporter-plugin` into `main`.
+
+---
+
+## 6. Influx v2 Parity & Out-of-Process IPC Enhancements
+
+1. **Out-of-Process JSON IPC Bridge (`US-3.1.0`)**: Communicates configuration (`Config.toml`), license/version metadata, and active `GPU Status` with an isolated desktop popup process (`--popup --owner HWND`) over `StdIn`/`StdOut` with `json:`-prefixed payloads, avoiding Qt GUI conflicts inside Adobe Premiere Pro.
+2. **WebM/MKV Final-Frame Export Guarantee (`US-3.2.0`)**: Ensures `GopTailFlusher` drains all delayed frames at EOF and normalizes start timestamps so exported WebM/MKV files never drop their last frame.
+3. **`drainBeforeFallback()` & Single-Session Warning Guard (`US-3.3.0`)**: Drains hardware encoder queues cleanly before switching to software encoding (`libsvtav1` / `libvpx-vp9`) and suppresses repetitive warning dialogs (`reduceWarnings`).

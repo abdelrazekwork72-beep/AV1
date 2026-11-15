@@ -192,3 +192,8 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete Doxygen docs for all 5 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 GPU Direct Color & Camera Gamut Specifications
+- **`unit-1` (`SourceVideoHandler`)**: Honors `!w=`, `!h=`, `!pf=`, and `!rft=1` modifiers and guarantees WebM/VP9/AV1 final-frame delivery at clip EOF.
+- **`unit-2` & `unit-3` (`PixelFormat8uEngine` & `PixelFormatHdrEngine`)**: Support forced pixel formats (`argb`, `bgra`, `bgra64`, `yuv420p`, `yuv420p10u`, `uyvy422`, `vuya`) and camera color spaces (`sRGB`, `BT.601`, `BT.709`, `BT.2020`, `BT.2100 HLG/PQ`, `DCDM X'Y'Z'`, `Sony SGamut/SLog2`, `SGamut3/SLog3`, `Cine/SLog3`).
+- **`unit-5` (`FrameScaler`)**: Implements direct GPU/SIMD `NV12` and `P010LE` $\to$ `BGRA` conversion (`cuda_bgra_nv12` / `cuda_bgra_p010` fast-path) and honors `!cr=full` (0–255) and `!cr=limited` (16–235) color range overrides.

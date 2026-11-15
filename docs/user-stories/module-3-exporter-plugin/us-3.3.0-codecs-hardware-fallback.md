@@ -215,3 +215,6 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 6 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 `drainBeforeFallback()` & Once-Per-Session Warning Deduplication
+- **`unit-6` (`ChromaFallbackGuard`)**: Implements `drainBeforeFallback()` to drain any in-flight hardware packets before switching to CPU encoding (`libsvtav1` / `libvpx-vp9`), and deduplicates `PrSDKErrorSuite` hardware warnings to once per Adobe session when `reduceWarnings` is active.

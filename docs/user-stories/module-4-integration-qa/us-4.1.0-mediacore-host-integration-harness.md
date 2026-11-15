@@ -169,3 +169,8 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 3 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 Dual-PRM Validation, 4-GPU Concurrency Cap & `!` Modifier Benchmarks
+- **`unit-1` (`DeploymentValidator`)**: Verifies both `OpenMedia_Importer.prm` (PiPL `"OpenMedia Importer"`, normal priority) and `OpenMedia_ImporterHP.prm` (PiPL `"OpenMedia Importer "`, priority 100) load cleanly without symbol or FourCC collisions.
+- **`unit-2` (`ScrubLatencyBenchmark`)**: Benchmarks `evaluateDecodePolicy()` across `< 2560x1600` (CPU path) and `>= 2560x1600` (GPU path up to 4 concurrent streams, verifying the 5th stream routes to CPU) and verifies 0 dropped final frames on WebM/AV1 streams.
+- **`unit-3` (`AmeQueueValidator`)**: Tests `Config.toml` overrides and `!` filename suffix modifiers (`!w=`, `!fr=24000d1001`, `!cr=full`, `!rft=1`) across batch jobs.

@@ -204,3 +204,7 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 5 audio headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 Influx v1.7.1 / v2.0.0 Beta 1 Fault-Tolerant Audio & MOV Multi-Channel PCM
+- **`unit-1` (`AudioExtractor`)**: Supports `xHE-AAC`, `AAC`, `MP3`, `AC3`, `DTS`, `Opus`, `FLAC`, `Vorbis`, and `PCM`; replaces isolated damaged audio packets with planar float silence (`0.0f`) instead of aborting the file import; imports declared audio streams that contain no audio packets as silence; and immediately closes the OS file handle if audio initialization fails so the file is never locked on Windows.
+- **`unit-4` (`MultiChannelRouter`)**: Adds support for 5-channel and 6-channel PCM audio in MOV containers (e.g., ARRI AMIRA ProRes clips) alongside 5.1, 7.1, Ambisonics, and up to 24/32 discrete channels.

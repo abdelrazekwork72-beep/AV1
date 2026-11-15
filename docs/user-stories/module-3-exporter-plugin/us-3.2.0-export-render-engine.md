@@ -207,3 +207,6 @@ AV1/
 | **Gate G-Complexity** | Complexity | Every function $CC \le 6$, nesting $\le 2$ | Complexity table on PR | `[ ]` |
 | **Gate G-Docs** | Documentation | Complete Doxygen documentation for all 5 headers | Doxygen build clean | `[ ]` |
 | **Gate G-Review** | Review Sign-Off | Independent Reviewing Council Approval | `gh pr comment` sign-off | `[ ]` |
+
+### 1.4 WebM/MKV Final-Frame Retention & Zero-Timestamp Alignment
+- **`unit-5` (`GopTailFlusher`)**: Ensures 100% of delayed lookahead frames are flushed and written before `av_write_trailer` so exported WebM (VP9/AV1) and MKV files never lose their final frame, with frame 0 normalized to `PTS = 0`.
