@@ -273,3 +273,14 @@ public:
    - `CoreDemuxer` (`demuxer.hpp/.cpp`) normalizes non-zero `start_time` to `PTS = 0`, rejects video-less/corrupt streams with `CoreStatus::NoDecodableFrames` (`"No decodable video frames in file"`), and unlocks OS file descriptors immediately on error.
    - `CoreVideoDecoder` (`video_decoder.hpp/.cpp`) drains 100% of buffered EOF frames so WebM/MKV clips never drop their last frame, and implements `HwDecodeBackend` (`None`, `NVDEC`, `D3D11VA`, `VideoToolbox`) with `drainBeforeFallback()`.
    - `CoreAudioDecoder` (`audio_decoder.hpp/.cpp`) supports `XHE_AAC`, `AAC`, `MP3`, `AC3`, and `DTS`, substitutes `0.0f` planar float silence for isolated damaged packets or empty tracks, and supports 5/6-channel MOV PCM.
+
+---
+
+## 6. `v3.0.0` Full Influx Binary Reverse-Engineering Parity Additions (`Module 1`)
+
+1. **Complete 16-Codec Video Decoder Dispatch (`src/core/video_decoder.cpp`)**:
+   - Expands `kCodecTable` beyond `AV1` (`libdav1d`) and `VP9` (`libvpx-vp9`) to include `VP8`, `H264`, `HEVC`, `VVC`, `ProRes`, `FFV1`, `HAP`, `DXV`, `Canopus`, `Bink`, `MJPEG`, `QOI`, `WebP`, and `APNG` so every container/codec combination supported by `Influx v1.7.1` & `v2.0.0beta1` decodes natively.
+2. **Real-Time Frame Decode Telemetry Publisher (`OpenMediaFrameDecodeTelemetry`)**:
+   - Exports `publishDecodeTelemetry()` and `getActiveDecodeTelemetrySnapshot()` (`InfluxVHostPublishDecodeMetadata` / `InfluxVHostTakeDecodeMetadata` parity) recording per-stream `fileId`, `filePath`, `codecName`, `width`, `height`, `activeBackend` (`NVDEC`, `D3D11VA`, `Vulkan`, `VideoToolbox`, `Software`), and `policyReason` for `OpenMediaDesktop.exe`'s `GPU Status` tab.
+3. **Matroska Last-Cluster Duration Probe & OBS Undeclared ProRes Flavor Detection (`src/core/demuxer.cpp`)**:
+   - Inspects the final cluster timestamp when Matroska container header duration is missing or truncated, and inspects ProRes frame headers when Matroska `CodecPrivate` FourCC is absent (emitting a once-per-file warning `"ProRes flavor is not declared"`).

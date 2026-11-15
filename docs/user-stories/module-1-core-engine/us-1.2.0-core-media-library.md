@@ -234,3 +234,12 @@ AV1/
 - **Fault-Tolerant Audio Silence Substitution & 5/6-Channel MOV PCM (`unit-3` — `CoreAudioDecoder`)**:
   - Adds `CodecId::XHE_AAC`, `CodecId::AAC`, `CodecId::MP3`, `CodecId::AC3`, and `CodecId::DTS`.
   - Substitutes zero-filled planar float silence (`0.0f`) when encountering isolated corrupted packets or empty audio streams instead of aborting import, and supports 5-channel and 6-channel MOV PCM layouts (ARRI AMIRA ProRes).
+
+---
+
+## 7. `v3.0.0` Core Engine Remediation (`16-Codec VideoDecoder`, `Telemetry ABI`, `Matroska/ProRes Probe`)
+
+- **`CoreVideoDecoder` Full Codec Coverage**:
+  - Maps `CodecId::AV1`, `CodecId::VP9`, `CodecId::VP8`, `CodecId::H264`, `CodecId::HEVC`, `CodecId::ProRes`, `CodecId::FFV1`, and fallback FFmpeg decoders so any video stream demuxed by `CoreDemuxer` can be decoded and seeked accurately.
+- **Shared Decode Telemetry Ring (`OpenMediaFrameDecodeTelemetry`)**:
+  - Thread-safe telemetry registry updated on every `CoreVideoDecoder::initialize()` and `decodeNextFrame()` call, serialized to `%APPDATA%\OpenMedia\gpu_status_telemetry.json` for `OpenMediaDesktop.exe`.

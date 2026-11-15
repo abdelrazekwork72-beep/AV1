@@ -223,3 +223,12 @@ AV1/
 - **Graceful Hardware `drainBeforeFallback()` & Warning Deduplication (`unit-2` & `unit-6` — `nvenc_encoder.hpp/.cpp` & `chroma_fallback_guard.hpp/.cpp`)**:
   - `ChromaFallbackGuard::drainBeforeFallback()` transfers all pending `RawVideoFrame` items into `outFlushedFrames` before switching from failed hardware encoders (`av1_nvenc`, `av1_amf`, `av1_qsv`, `av1_vulkan`) to CPU (`libsvtav1` / `libvpx-vp9`).
   - Tracks `FallbackSessionState` (`warningEmitted`, `warningsSuppressed`) so `PrSDKErrorSuite` is notified at most once per session when `reduceWarnings = true`.
+
+---
+
+## 7. `v3.0.0` Integration with `Module 5` (`OpenMediaDesktop.exe` Bilingual Control Center)
+
+- **`PopupIpcBridge` Bidirectional Connection to `OpenMediaDesktop.exe`**:
+  - `OpenMedia_Exporter.prm` invokes `OpenMediaDesktop.exe --popup --owner <HWND>` for out-of-process settings and `GPU Status` visualization in English (LTR) or Arabic (RTL).
+- **Unified Hardware Session Telemetry**:
+  - Active `NVENC`, `AMF`, `QSV`, and `Vulkan` export sessions publish telemetry entries to `gpu_status_telemetry.json` alongside Importer decode sessions.

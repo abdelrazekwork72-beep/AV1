@@ -217,3 +217,12 @@ AV1/
   - Builds isolated popup CLI arguments (`--popup --owner <HWND>`) and serializes/parses `json:`-prefixed messages over `StdIn`/`StdOut` containing `configTomlPath`, `PopupGpuStatus` (`activeDecoder`, `activeEncoder`, `hardwareAvailable`), and `ExporterPresetParams`.
 - **HDR & Sony Cinema Color Metadata Presets (`unit-2`)**:
   - Adds `ExportColorMetadata` (`BT709`, `BT2100_PQ`, `BT2100_HLG`, `Sony_SLog3`) to export parameter trees and `.epr` preset serialization.
+
+---
+
+## 7. `v3.0.0` Integration with `Module 5` (`OpenMediaDesktop.exe` Bilingual Control Center)
+
+- **`PopupIpcBridge` Bidirectional Connection to `OpenMediaDesktop.exe`**:
+  - `OpenMedia_Exporter.prm` invokes `OpenMediaDesktop.exe --popup --owner <HWND>` for out-of-process settings and `GPU Status` visualization in English (LTR) or Arabic (RTL).
+- **Unified Hardware Session Telemetry**:
+  - Active `NVENC`, `AMF`, `QSV`, and `Vulkan` export sessions publish telemetry entries to `gpu_status_telemetry.json` alongside Importer decode sessions.

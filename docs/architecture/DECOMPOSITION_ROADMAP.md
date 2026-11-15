@@ -116,7 +116,7 @@ $$S_{\text{story}} = (0.35 \times D_1) + (0.25 \times D_2) + (0.20 \times D_3) +
 
 ---
 
-## 4. Complete 50-Unit Master Index & Disjoint File Ownership
+## 4. Complete 58-Unit Master Index & Disjoint File Ownership (Modules 1..5)
 
 | Module | Story | Unit ID | Unit Branch | Primary Deliverable & Owned Production / Test Files |
 | :--- | :--- | :--- | :--- | :--- |
@@ -170,12 +170,20 @@ $$S_{\text{story}} = (0.35 \times D_1) + (0.25 \times D_2) + (0.20 \times D_3) +
 | **M4** | `US-4.2.0` | `unit-1` | `feat/us-4.2.0/unit-1-windows-msi-installer` | `packaging/cpack/CPackConfig_Windows.cmake`, `packaging/cpack/windows/wix_patch.xml`, `tests/packaging/test_windows_cpack.cmake` |
 | **M4** | `US-4.2.0` | `unit-2` | `feat/us-4.2.0/unit-2-macos-pkg-installer` | `packaging/cpack/CPackConfig_macOS.cmake`, `packaging/cpack/macos/distribution.xml`, `packaging/cpack/macos/postinstall.sh`, `tests/packaging/test_macos_cpack.cmake` |
 | **M4** | `US-4.2.0` | `unit-3` | `feat/us-4.2.0/unit-3-license-compliance-packager` | `packaging/cpack/MultiCPackConfig.cmake`, `packaging/scripts/audit_licenses.py`, `packaging/scripts/generate_third_party_notices.py`, `tests/packaging/test_license_audit.py` |
+| **M5** | `US-5.1.0` | `unit-1` | `feat/us-5.1.0/unit-1-bilingual-i18n-engine` | `include/desktop/i18n_engine.hpp`, `src/desktop/i18n_engine.cpp`, `tests/desktop/test_i18n_engine.cpp` |
+| **M5** | `US-5.1.0` | `unit-2` | `feat/us-5.1.0/unit-2-config-toml-editor` | `include/desktop/config_toml_editor.hpp`, `src/desktop/config_toml_editor.cpp`, `tests/desktop/test_config_toml_editor.cpp` |
+| **M5** | `US-5.1.0` | `unit-3` | `feat/us-5.1.0/unit-3-gpu-status-monitor` | `include/desktop/gpu_status_monitor.hpp`, `src/desktop/gpu_status_monitor.cpp`, `tests/desktop/test_gpu_status_monitor.cpp` |
+| **M5** | `US-5.1.0` | `unit-4` | `feat/us-5.1.0/unit-4-plugin-health-and-guide` | `include/desktop/plugin_health_guide.hpp`, `src/desktop/plugin_health_guide.cpp`, `tests/desktop/test_plugin_health_guide.cpp` |
+| **M5** | `US-5.2.0` | `unit-1` | `feat/us-5.2.0/unit-1-cache-and-log-manager` | `include/desktop/cache_log_manager.hpp`, `src/desktop/cache_log_manager.cpp`, `tests/desktop/test_cache_log_manager.cpp` |
+| **M5** | `US-5.2.0` | `unit-2` | `feat/us-5.2.0/unit-2-suffix-modifier-builder` | `include/desktop/suffix_modifier_builder.hpp`, `src/desktop/suffix_modifier_builder.cpp`, `tests/desktop/test_suffix_modifier_builder.cpp` |
+| **M5** | `US-5.2.0` | `unit-3` | `feat/us-5.2.0/unit-3-premiere-resolve-shortcut-converter` | `include/desktop/shortcut_converter.hpp`, `src/desktop/shortcut_converter.cpp`, `tests/desktop/test_shortcut_converter.cpp` |
+| **M5** | `US-5.2.0` | `unit-4` | `feat/us-5.2.0/unit-4-desktop-main-window-and-exe` | `include/desktop/desktop_main_window.hpp`, `src/desktop/desktop_main_window.cpp`, `src/desktop/main_desktop.cpp`, `tests/desktop/test_desktop_main_window.cpp` |
 
 ---
 
 ## 5. Unified Repository Directory Architecture
 
-All 4 modules and 50 implementation units strictly adhere to a single unified directory layout and C++17 namespace hierarchy (`openmedia`, `openmedia::importer`, `openmedia::exporter`, `openmedia::qa`):
+All 5 modules and 58 implementation units strictly adhere to a single unified directory layout and C++17 namespace hierarchy (`openmedia`, `openmedia::importer`, `openmedia::exporter`, `openmedia::qa`, `openmedia::desktop`):
 
 ```text
 AV1/
@@ -232,10 +240,21 @@ AV1/
 │       ├── vulkan_encoder.hpp                   # US-3.3.0 unit-4
 │       ├── rate_control_normalizer.hpp          # US-3.3.0 unit-5
 │       └── chroma_fallback_guard.hpp            # US-3.3.0 unit-6
+│   └── desktop/                                 # Module 5 Desktop & Popup headers (namespace openmedia::desktop)
+│       ├── desktop_types.hpp                    # Base Contract (Pre-seeded on Module 5)
+│       ├── i18n_engine.hpp                      # US-5.1.0 unit-1 (English LTR / Arabic RTL)
+│       ├── config_toml_editor.hpp               # US-5.1.0 unit-2 (16-Key Config.toml Manager)
+│       ├── gpu_status_monitor.hpp               # US-5.1.0 unit-3 (Live GPU Status Panel)
+│       ├── plugin_health_guide.hpp              # US-5.1.0 unit-4 (MediaCore Health & User Guide)
+│       ├── cache_log_manager.hpp                # US-5.2.0 unit-1 (Thumbnail/Media Cache Purge & Log ZIP)
+│       ├── suffix_modifier_builder.hpp          # US-5.2.0 unit-2 (!options.influx Batch Builder)
+│       ├── shortcut_converter.hpp               # US-5.2.0 unit-3 (Premiere .kys <-> Resolve .txt)
+│       └── desktop_main_window.hpp              # US-5.2.0 unit-4 (Win32 Dark Studio GUI & Popup)
 ├── src/
 │   ├── core/                                    # Module 1 implementation (.cpp)
 │   ├── importer/                                # Module 2 implementation (.cpp)
-│   └── exporter/                                # Module 3 implementation (.cpp)
+│   ├── exporter/                                # Module 3 implementation (.cpp)
+│   └── desktop/                                 # Module 5 implementation (.cpp -> OpenMediaDesktop.exe)
 ├── resources/
 │   ├── importer_resources.rc                    # Windows IMPT & PiPL (llvm-rc / windres)
 │   ├── importer_pipl.r                          # macOS PiPL resource
@@ -298,3 +317,21 @@ All 4 modules and 50 implementation units (plus 2 dedicated Influx-v2 verificati
 | **Module 3** | `US-3.3.0` | **Hardware `drainBeforeFallback()` & Warning Deduplication**: Flushes pending frames before falling back from `NVENC`/`AMF`/`QSV`/`Vulkan` to `libsvtav1`/`libvpx-vp9` and emits at most one warning per session via `PrSDKErrorSuite` (`FallbackSessionState`). |
 | **Module 4** | `US-4.1.0` | **Dual-PRM Deployment Validator & Dual-Policy Scrub Benchmark**: Validates both `OpenMedia_Importer.prm` (`0x00`) and `OpenMedia_ImporterHP.prm` (`0x01` + trailing-space PiPL), benchmarks `< 2560x1600` CPU vs `>= 2560x1600` GPU (with 5th-stream CPU overflow and final-frame retention), and validates `Config.toml` policy in `AmeQueueValidator`. |
 | **Module 4** | `US-4.2.0` | **Dual-PRM + `Config.toml` Packaging & VC++ Runtime Verification**: Packages `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`/`.dylib`, and `packaging/Config.toml`, and verifies `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll` in `wix_patch.xml` and `Install-MediaCore.ps1`. |
+
+---
+
+## 8. Influx v1.7.1 & v2.0.0beta1 Full Binary Reverse-Engineering Parity & Remediation Specification (Modules 1..5 — `v3.0.0`)
+
+Following static PE/binary reverse engineering of **Autokroma Influx (`v1.7.1` & `v2.0.0beta1`)** (`Influx.exe`, `InfluxAdobe.prm`, `InfluxAdobeHP.prm`, `InfluxAdobeBase.dll`, and `ffkroma_influx_hwaccel.dll`), the following architectural remediations and new subsystems are enforced across Modules 1 through 5:
+
+| Module | Target Subsystem | Reverse-Engineered Influx Mechanism (`v1.7.1` + `v2.0.0beta1`) | Required `OpenMedia v3.0.0` Implementation & Remediation |
+| :--- | :--- | :--- | :--- |
+| **Module 1** | `CoreVideoDecoder` (`src/core/video_decoder.cpp`) | `InfluxAdobeBase.dll` opens all FFmpeg video decoders (`AV1`, `VP9`, `VP8`, `H.264`, `HEVC`, `VVC`, `ProRes`, `FFV1`, `HAP`, `DXV`, `Canopus`, `Bink`, `MJPEG`, `QOI`, `WebP`, `APNG`) and prefers `libdav1d` / `libvpx-vp9` | Expand `kCodecTable` in `video_decoder.cpp` from 2 codecs (`AV1`, `VP9`) to all 16+ supported `CodecId` entries with `avcodec_find_decoder` fallback so `H.264`, `HEVC`, `ProRes`, `FFV1`, and `VP8` streams decode natively. |
+| **Module 1** | `CoreDemuxer` & Telemetry (`src/core/demuxer.cpp`) | `InfluxVHostPublishDecodeMetadata` / `InfluxFrameDecodeTelemetry` publishes per-file GPU/CPU decode telemetry; Matroska duration is corrected from the last cluster; undeclared OBS `ProRes` flavor is inspected from frame headers | Add `OpenMediaFrameDecodeTelemetry` shared publisher/snapshot API in `OpenMediaCore`, Matroska last-cluster duration correction, and undeclared `ProRes` FourCC warning detection. |
+| **Module 2** | Real Audio & Waveform Pipeline (`src/importer/importer_entry.cpp`) | `LumiereImportAudio7` (`readLuAudioFrame` + `swr_convert`) decodes real audio samples and closes OS file handles immediately on audio init error (`Influx 1.7.1` fix) | Replace the zero-filled `silence` stub in `handleImImportAudio7` and `handleImGetPeakAudio` with real packet demuxing + `session->audioDecoder->decodeAudioBatch()` and real peak waveform extraction. |
+| **Module 2** | Frame-Accurate Seeking (`src/importer/importer_entry.cpp`) | `readLuVideoFrame` / `findFrameFastStrategy` seeks to `seek_anchor_frame` (`KeyframeRingBuffer`) with open-GOP preroll before decoding the target frame | Update `handleImGetSourceVideo` to compute target PTS from `rec->inFrameTime`, invoke `demuxer->seekToPts()` / `KeyframeRingBuffer::seekExactFrame()` when scrubbing non-sequentially, and cache decoded frames. |
+| **Module 2** | 30+ Formats & 13 `!options.influx` Modifiers (`src/importer/file_probe.cpp`) | Supports 30+ extensions (`360, 3gp, aac, ac3, aiff, apng, avi, bik, dts, flac, flv, gif, influx, mjpeg, mka, mkv, mov, mp3, mp4, mpg, mxf, ogg, ogv, opus, qoi, ts, m2ts, mts, vob, wav, webm, wma, wmv, y4m`) and reads 13 `!` modifiers after the **last** `!` | Expand `kSupportedFormats` to 30+ extensions, update `FilenameModifiers` to preserve `!` inside original filenames and parse all 13 tokens (`!w=`, `!h=`, `!vs=`, `!as=`, `!pf=`, `!fr=`, `!ar=`, `!sr=`, `!threads=`, `!cs=`, `!cr=`, `!accurate_duration`, `!rft=1`), and apply them directly to `StreamInfo` during `openAndProbe` / `populateFileInfo`. |
+| **Module 2** | Multi-Entry Thumbnail Cache, Timecode Overlay & RAM Eviction (`ppix_cache_bridge.cpp`, `memory_governor.cpp`) | Stores multiple thumbnails in SQLite3 with `DELETE FROM thumbnails; VACUUM;`, embeds `00:10:03:12` timecode overlay (`always_show`, `hide_when_zero`, `always_hide`), and evicts oldest open file sessions (`lu_file_storage_close_oldest_file`) | Upgrade `PPixCacheBridge` to append/lookup multiple thumbnail records with `clearAllThumbnails()` (`VACUUM`) and timecode bitmap overlay, and add LRU session eviction in `MemoryGovernor`. |
+| **Module 2 & 3** | Host Popup Integration (`imGetPrefs8` & `exSelSetup`) | Right-clicking a clip in Premiere Pro (`Source Settings…`) or After Effects (`Interpret Footage > More Options…`) launches `Influx.exe` with `"popup": "HostSettings"` | Wire `handleImGetPrefs8` in `importer_entry.cpp` and `PopupIpcBridge` in `exporter` to launch `OpenMediaDesktop.exe --popup --owner <HWND>`. |
+| **Module 5** | `OpenMediaDesktop.exe` (`src/desktop/`) | `Influx.exe` (`wxWidgets 3.2.8.1`) + `Premiere-to-Resolve shortcut report.txt` (`Aer.kys` $\to$ `DaVinci Resolve Keys.txt`) | Build `OpenMediaDesktop.exe` with bilingual **English (LTR) / Arabic (RTL)** Dark Studio UI, 16-key `Config.toml` editor, live `GPU Status` table, Thumbnail & Premiere Media Cache cleaners, Log ZIP exporter, `!options.influx` batch builder, and Premiere `.kys` $\leftrightarrow$ DaVinci Resolve `.txt` shortcut converter. |
+| **Module 4** | Packaging & QA (`openmedia_installer.nsi`, `tests/`) | NSIS installer packages `Influx.exe` + `.prm` shims + FFmpeg DLLs and supports silent CLI install `/S` and `-Uninstall_Influx` | Package `OpenMediaDesktop.exe` alongside `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`, and `Config.toml` with Start Menu/Desktop shortcuts and 60 CTest suites. |

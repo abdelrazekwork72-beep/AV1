@@ -214,3 +214,14 @@ AV1/
   - Invokes `demuxer.close()` / `quietFile()` immediately if audio initialization fails so files are never locked on Windows.
 - **5/6-Channel MOV PCM & 24/32-Channel Surround Routing (`unit-4` — `multi_channel_router.hpp/.cpp`)**:
   - Maps 5-channel (`5.0`) and 6-channel (`5.1`) MOV PCM layouts (such as ARRI AMIRA ProRes multi-track PCM) as well as 24-channel and 32-channel discrete layouts to Adobe `PrAudioChannelLabel` constants.
+
+---
+
+## 7. `v3.0.0` Remediation: Live `CoreAudioDecoder` Wiring in `imImportAudio7` & `imGetPeakAudio`
+
+- **Zero-Stub Real Audio Decoding**:
+  - `handleImImportAudio7` reads audio packets from `session->demuxer`, decodes them via `session->audioDecoder->decodeAudioBatch()`, and copies real 32-bit float planar samples into `rec->buffer` (substituting `0.0f` silence only when an individual packet is damaged or the track is empty).
+- **Real Waveform Peak Generation**:
+  - `handleImGetPeakAudio` decodes audio samples for the requested range and computes true min/max peak arrays via `PeakWaveformGenerator::generatePeaks()`.
+- **Immediate Windows File Handle Release on Audio Error**:
+  - If audio stream initialization fails during `openAndProbe` or `initSessionDecoders`, the underlying file descriptor is immediately closed so Windows users can move, rename, or delete the file without quitting Premiere Pro.

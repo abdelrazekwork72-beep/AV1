@@ -201,3 +201,12 @@ AV1/
   - `PixelFormatHdrEngine::convertNv12ToBgra8()`, `convertP010ToBgra8()`, and `convertP010ToRgb444_10u()` (alongside `FrameScaler`) perform direct 16-byte aligned color conversion modeling Influx v2's `cuda_bgra_nv12` and `cuda_bgra_p010` pipeline.
 - **Extended Cinema & HDR Transfer/Gamut Support (`unit-3` & `unit-5`)**:
   - Adds `ExtendedColorSpace` / transfer support for `sRGB`, `BT.601`, `BT.709`, `BT.2020`, `BT.2100_HLG`, `BT.2100_PQ`, `DCDM_XYZ`, `Sony_SGamut_SLog2`, `Sony_SGamut3_SLog3`, and `Sony_Cine_SLog3`.
+
+---
+
+## 7. `v3.0.0` Remediation: Frame-Accurate Timeline Scrubbing & Hardware Surface Conversion
+
+- **Exact Frame Seeking in `handleImGetSourceVideo`**:
+  - Computes target frame index and PTS from `ImSourceVideoRecExt::inFrameTime`, queries `KeyframeRingBuffer` for buffered frames, and seeks `CoreDemuxer` when jumping across non-contiguous timeline positions.
+- **SIMD & GPU Surface Transfer (`D3D11VA` / `NVDEC` / `Vulkan`)**:
+  - Transfers decoded `NV12` / `P010LE` surfaces with 16-byte row alignment and color space conversion (`BT.601`, `BT.709`, `BT.2020`, `BT.2100 PQ/HLG`, `Sony S-Log3`).

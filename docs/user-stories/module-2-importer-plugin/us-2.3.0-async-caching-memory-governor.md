@@ -246,3 +246,14 @@ AV1/
 - **Exact Open-GOP / Long-GOP Seeking (`unit-3` — `keyframe_ring_buffer.hpp/.cpp`)**:
   - Ensures Long-GOP and open-GOP seeks (AVCHD/MTS, Canon C70 MXF, H.264/HEVC, AV1) resolve the exact target presentation timestamp and roll back to the prior reference keyframe when needed so an adjacent wrong frame is never displayed.
 - **Verification**: Tested in `tests/importer/test_influx_gpu_policy_and_sqlite.cpp`.
+
+---
+
+## 7. `v3.0.0` Remediation: Multi-Entry Thumbnail Cache, Embedded Timecode Overlay & LRU Session Eviction
+
+- **Multi-Entry Persistent Thumbnail Cache & `VACUUM`**:
+  - `PPixCacheBridge` persists multiple `(path, width, height, frame)` records without truncating prior entries on save, and exposes `purgeThumbnailDatabase()` (`DELETE FROM thumbnails; VACUUM;`) for `OpenMediaDesktop.exe`.
+- **Thumbnail Timecode Overlay (`00:10:03:12`)**:
+  - Renders `HH:MM:SS:FF` media start timecode in the bottom-right corner of thumbnails according to `Config.toml` (`always_show`, `hide_when_zero`, `always_hide`).
+- **LRU Session Eviction (`MemoryGovernor::evictOldestSessionsIfNeeded`)**:
+  - Tracks `lastAccess` timestamps across open `ImporterFileSession` instances and closes the oldest idle file handles when estimated memory exceeds `maxPercentUsageAvailableMemory`.

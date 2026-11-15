@@ -225,3 +225,12 @@ AV1/
 - **Dual-PRM Target Generation (`unit-1`)**: `CMakeLists.txt` defines `OpenMedia_Importer` (Normal Priority `0x00`) and `OpenMedia_ImporterHP` (High-Priority Override `0x01` compiled with `OPENMEDIA_HIGH_PRIORITY_SHIM=1` and linked with `resources/importer_hp_resources.rc` on Windows and `resources/Info_ImporterHP.plist.in` on macOS).
 - **Release LTCG, AVX2 SIMD & PE Security Hardening (`unit-1`)**: `cmake/CompilerWarnings.cmake` configures `openmedia_apply_release_hardening()` enabling Link-Time Code Generation (`CMAKE_INTERPROCEDURAL_OPTIMIZATION`), `AVX2`/`SSE4.1` instructions, and Windows PE security flags (`/DYNAMICBASE`, `/NXCOMPAT`, `/HIGHENTROPYVA`).
 - **Verification**: `tests/build/test_cmake_targets.cmake` verifies both `OpenMedia_Importer` and `OpenMedia_ImporterHP` targets and hardening macros.
+
+---
+
+## 7. `v3.0.0` Build System Additions (`OpenMediaDesktop` Target & Packaging Linkage)
+
+- **New Executable Target (`OpenMediaDesktop`)**:
+  - `CMakeLists.txt` builds `OpenMediaDesktop` (`OpenMediaDesktop.exe` on Windows x64) from `src/desktop/*.cpp`, linking against `OpenMediaCore` and Windows native GUI/system libraries (`user32`, `gdi32`, `comctl32`, `comdlg32`, `shell32`, `ole32`) with `/DYNAMICBASE /NXCOMPAT /HIGHENTROPYVA`.
+- **Expanded CTest Suite (`60` Targets)**:
+  - Registers all `Module 5` unit tests (`test_i18n_engine`, `test_config_toml_editor`, `test_gpu_status_monitor`, `test_plugin_health_guide`, `test_cache_log_manager`, `test_suffix_modifier_builder`, `test_shortcut_converter`, `test_desktop_main_window`) alongside existing `Module 1..4` suites.

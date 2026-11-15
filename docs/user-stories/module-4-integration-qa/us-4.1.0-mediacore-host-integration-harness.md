@@ -180,3 +180,13 @@ AV1/
   - `evaluateDecodePolicy()` and `runDualPolicyBenchmark()` verify `< 2560x1600` CPU routing, `>= 2560x1600` GPU routing up to 4 concurrent streams, automatic 5th-stream overflow to CPU, `< 50ms` p95 scrub latency, and 100% WebM/AV1 final-frame retention (`verifyFinalFrameRetention()`).
 - **`Config.toml` Policy Validation in AME Harness (`unit-3` — `ame_queue_validator.hpp/.cpp`)**:
   - `validateConfigTomlPolicy()` verifies `packaging/Config.toml` settings (`[dual_prm]`, `[decode_policy]`, `gpu_min_width = 2560`, `gpu_min_height = 1600`, `max_gpu_streams = 4`) before running the 5-job batch queue.
+
+---
+
+## 6. `v3.0.0` Integration & Packaging Additions (`OpenMediaDesktop.exe` + `60` CTest Targets)
+
+1. **End-to-End Verification of Real Audio, Exact Scrubbing & `Module 5` Desktop App (`US-4.1.0`)**:
+   - Verifies non-zero decoded audio samples in `imImportAudio7`, non-zero waveform peaks in `imGetPeakAudio`, frame-accurate non-sequential seeking in `imGetSourceVideo`, and `OpenMediaDesktop.exe --headless-self-test` / `--popup` execution across all **60 CTest targets**.
+2. **Windows NSIS Installer & Portable Bundle with `OpenMediaDesktop.exe` (`US-4.2.0`)**:
+   - Packages `OpenMediaDesktop.exe` into `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore` alongside `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`, FFmpeg shared DLLs, and `Config.toml`.
+   - Creates Windows Start Menu and Desktop shortcuts (`OpenMedia Control Center`) and supports silent enterprise deployment (`Setup.exe /S` and `Uninstall-OpenMedia.exe /S -Uninstall_OpenMedia`).

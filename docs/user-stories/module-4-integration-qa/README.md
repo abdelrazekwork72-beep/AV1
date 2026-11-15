@@ -111,3 +111,13 @@ public:
 2. **Dual-PRM + `Config.toml` Packaging & `VCRUNTIME140.dll` Check (`US-4.2.0`)**:
    - `CPackConfig_Windows.cmake`, `CPackConfig_macOS.cmake`, and `.github/workflows/release-build.yml` bundle `OpenMedia_Importer.prm`/`.bundle`, `OpenMedia_ImporterHP.prm`/`.bundle`, `OpenMedia_Exporter.prm`/`.bundle`, `OpenMediaCore.dll`/`.dylib`, and `packaging/Config.toml`.
    - `packaging/cpack/windows/wix_patch.xml` and `Install-MediaCore.ps1` verify `VCRUNTIME140.dll` and `VCRUNTIME140_1.dll` presence with clear guidance for Microsoft Visual C++ Redistributable.
+
+---
+
+## 6. `v3.0.0` Integration & Packaging Additions (`OpenMediaDesktop.exe` + `60` CTest Targets)
+
+1. **End-to-End Verification of Real Audio, Exact Scrubbing & `Module 5` Desktop App (`US-4.1.0`)**:
+   - Verifies non-zero decoded audio samples in `imImportAudio7`, non-zero waveform peaks in `imGetPeakAudio`, frame-accurate non-sequential seeking in `imGetSourceVideo`, and `OpenMediaDesktop.exe --headless-self-test` / `--popup` execution across all **60 CTest targets**.
+2. **Windows NSIS Installer & Portable Bundle with `OpenMediaDesktop.exe` (`US-4.2.0`)**:
+   - Packages `OpenMediaDesktop.exe` into `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore` alongside `OpenMedia_Importer.prm`, `OpenMedia_ImporterHP.prm`, `OpenMedia_Exporter.prm`, `OpenMediaCore.dll`, FFmpeg shared DLLs, and `Config.toml`.
+   - Creates Windows Start Menu and Desktop shortcuts (`OpenMedia Control Center`) and supports silent enterprise deployment (`Setup.exe /S` and `Uninstall-OpenMedia.exe /S -Uninstall_OpenMedia`).

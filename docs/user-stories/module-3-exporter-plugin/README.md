@@ -159,3 +159,12 @@ struct ExporterInstance {
    - `PushRenderLoop`, `PullSequenceRenderer`, and `GopTailFlusher` normalize the first exported frame timestamp to `PTS = 0` and drain 100% of trailing GOP frames at sequence EOF so exported WebM/MKV clips never lose their final frame.
 3. **Hardware Encoder `drainBeforeFallback()` & Session Warning Deduplication (`US-3.3.0`)**:
    - `ChromaFallbackGuard::drainBeforeFallback()` flushes pending frames before switching from `NVENC`/`AMF`/`QSV`/`Vulkan` to `libsvtav1`/`libvpx-vp9` and uses `FallbackSessionState` to emit at most one warning per session via `PrSDKErrorSuite` (`reduceWarnings`).
+
+---
+
+## 7. `v3.0.0` Integration with `Module 5` (`OpenMediaDesktop.exe` Bilingual Control Center)
+
+- **`PopupIpcBridge` Bidirectional Connection to `OpenMediaDesktop.exe`**:
+  - `OpenMedia_Exporter.prm` invokes `OpenMediaDesktop.exe --popup --owner <HWND>` for out-of-process settings and `GPU Status` visualization in English (LTR) or Arabic (RTL).
+- **Unified Hardware Session Telemetry**:
+  - Active `NVENC`, `AMF`, `QSV`, and `Vulkan` export sessions publish telemetry entries to `gpu_status_telemetry.json` alongside Importer decode sessions.

@@ -212,3 +212,13 @@ AV1/
   - `FilenameModifiers::parseFilenameModifiers()` parses options after the last `!` before the extension (including `.influx` / `.openmedia`): `!w=`, `!h=` (with `resolveAspectRatio()`), `!vs=`, `!as=`, `!pf=` / `!pixel_format=`, `!fr=` / `!frame_rate=` (supporting `<num>d<den>`), `!cr=full|limited`, `!accurate_duration`, and `!rft=1`.
   - `ErrorDeduplicator` suppresses duplicate per-frame warnings for the same file instance.
 - **Verification**: Tested in `tests/importer/test_influx_config_modifiers.cpp` and `tests/importer/test_importer_registration.cpp`.
+
+---
+
+## 7. `v3.0.0` Remediation: 30+ Container Extensions, Last-`!` 13-Modifier Application & `imGetPrefs8` Host Popup
+
+- **Expanded Format Table (`30+` Extensions)**: Registers all video, audio, and image container extensions supported by `Influx v1.7.1` & `v2.0.0beta1` in `kSupportedFormats`.
+- **Last-`!` Modifier Parsing & Active `StreamInfo` Application**:
+  - Scans modifier tokens (`!w=`, `!h=`, `!vs=`, `!as=`, `!pf=`, `!fr=`, `!ar=`, `!sr=`, `!threads=`, `!cs=`, `!cr=`, `!accurate_duration`, `!rft=1`) from the trailing modifier block so filenames containing `!` in their stem (e.g. `Scene!01!w=1920.mkv.influx`) import cleanly, and mutates `StreamInfo` dimensions, frame rate, color range, and selected stream indices during `openAndProbe()`.
+- **`handleImGetPrefs8` Host Settings Popup**:
+  - Invokes `OpenMediaDesktop.exe --popup` when the user clicks `Source Settings…` in Premiere Pro or `Interpret Footage > More Options…` in After Effects.

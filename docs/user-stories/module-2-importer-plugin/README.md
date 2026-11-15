@@ -195,3 +195,19 @@ public:
    - `KeyframeRingBuffer` performs exact-frame open-GOP / Long-GOP seeking.
 4. **Fault-Tolerant Audio & 5/6/24/32-Channel Routing (`US-2.4.0`)**:
    - `AudioExtractor` substitutes `0.0f` planar silence on damaged packets and immediately releases file descriptors on fatal init error; `MultiChannelRouter` supports 5/6-channel MOV PCM and up to 24/32 discrete channels.
+
+---
+
+## 6. `v3.0.0` Full Influx v1.7.1 & v2.0.0beta1 Importer Remediations (`Module 2`)
+
+1. **Real Audio & Waveform Decoding in `importer_entry.cpp` (`US-2.4.0`)**:
+   - Eliminates the hardcoded zero-silence vector in `handleImImportAudio7` and `handleImGetPeakAudio`: demuxes audio packets from `ImporterFileSession::demuxer`, decodes 32-bit float planar samples via `ImporterFileSession::audioDecoder`, populates `rec->buffer`, and computes real min/max waveform peaks via `PeakWaveformGenerator::generatePeaks()`.
+   - Immediately closes OS file handles when audio initialization fails so Windows never locks broken media files.
+2. **Frame-Accurate Seeking & Open-GOP Preroll in `handleImGetSourceVideo` (`US-2.2.0` & `US-2.3.0`)**:
+   - Translates `rec->inFrameTime` into target PTS, checks `PPixCacheBridge` and `KeyframeRingBuffer::findBufferedFrame()`, and on cache miss performs `demuxer->seekToPts()` to the preceding keyframe (`KeyframeRingBuffer::seekExactFrame()`) before decoding forward to the exact requested frame.
+3. **30+ Supported Formats, Last-`!` 13-Token Modifiers & Active `StreamInfo` Overrides (`US-2.1.0`)**:
+   - Expands `kSupportedFormats` to 30+ extensions (`mkv, webm, ogg, ogv, flv, avi, mp4, mov, m4v, mpg, mpeg, ts, m2ts, mts, vob, mxf, wmv, wma, asf, bik, 3gp, 360, y4m, mjpeg, apng, webp, qoi, gif, flac, opus, mka, wav, aac, mp3, ac3, dts, aiff, influx, openmedia`).
+   - Fixes `FilenameModifiers::parseFilenameModifiers` to preserve `!` inside original filenames and apply `!w=`, `!h=`, `!vs=`, `!as=`, `!pf=`, `!fr=`, `!ar=`, `!sr=`, `!threads=`, `!cs=`, `!cr=`, `!accurate_duration`, and `!rft=1` directly onto the active session's `StreamInfo`.
+   - Wires `handleImGetPrefs8` (`Source Settings…`) to spawn `OpenMediaDesktop.exe --popup`.
+4. **Multi-Record Thumbnail Cache, Timecode Overlay & LRU Session Eviction (`US-2.3.0`)**:
+   - Upgrades `PPixCacheBridge` to store and query multiple thumbnail entries per database file, supports `clearAllThumbnails()` (`VACUUM`), renders embedded bottom-right timecode (`00:10:03:12`) when `thumbnailTimecode` is `always_show` or `hide_when_zero`, and evicts oldest idle file sessions in `MemoryGovernor` when RAM usage exceeds `maxPercentUsageAvailableMemory`.

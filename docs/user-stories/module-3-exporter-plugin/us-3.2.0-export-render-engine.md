@@ -216,3 +216,12 @@ AV1/
   - Normalizes non-zero initial timeline frame timestamps so exported streams always start cleanly at `PTS = 0`.
 - **100% EOF Final-Frame Retention (`unit-5` — `gop_tail_flusher.hpp/.cpp`)**:
   - Drains all buffered lookahead and B-frames at sequence EOF and verifies final frame delivery before writing Matroska/WebM Cues and trailer.
+
+---
+
+## 7. `v3.0.0` Integration with `Module 5` (`OpenMediaDesktop.exe` Bilingual Control Center)
+
+- **`PopupIpcBridge` Bidirectional Connection to `OpenMediaDesktop.exe`**:
+  - `OpenMedia_Exporter.prm` invokes `OpenMediaDesktop.exe --popup --owner <HWND>` for out-of-process settings and `GPU Status` visualization in English (LTR) or Arabic (RTL).
+- **Unified Hardware Session Telemetry**:
+  - Active `NVENC`, `AMF`, `QSV`, and `Vulkan` export sessions publish telemetry entries to `gpu_status_telemetry.json` alongside Importer decode sessions.
