@@ -31,7 +31,7 @@ RawVideoFrame makeSynthetic10BitFrame(int32_t width, int32_t height, int64_t pts
     frame.rowBytes[1] = uvStride;
     frame.rowBytes[2] = uvStride;
 
-    frame.planes[0].assign(static_cast<size_t>(yStride) * height, static_cast<uint8_t>(pts & 0xFF));
+    frame.planes[0].assign(static_cast<size_t>(yStride) * height, static_cast<uint8_t>((pts % 3) + 1));
     frame.planes[1].assign(static_cast<size_t>(uvStride) * (height / 2), 0x02);
     frame.planes[2].assign(static_cast<size_t>(uvStride) * (height / 2), 0x02);
     return frame;
@@ -67,7 +67,7 @@ RawVideoFrame makeSyntheticFrameForFormat(PixelFormat fmt, int32_t width, int32_
         frame.rowBytes[0] = stride;
         frame.rowBytes[1] = stride;
         frame.rowBytes[2] = stride;
-        frame.planes[0].assign(static_cast<size_t>(stride) * height, 0x10);
+        frame.planes[0].assign(static_cast<size_t>(stride) * height, 0x01);
         frame.planes[1].assign(static_cast<size_t>(stride) * height, 0x02);
         frame.planes[2].assign(static_cast<size_t>(stride) * height, 0x02);
         return frame;

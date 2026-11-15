@@ -341,11 +341,23 @@ CoreStatus openCodecWithFallback(const VideoEncodeConfig& config, AVCodecCtxPtr&
 }
 
 void copyPlaneRows(const uint8_t* src, uint32_t srcStride, uint8_t* dst,
-                   int dstStride, int rows, uint32_t widthBytes) noexcept {
+                   int dstStride, int rows, uint32_t widthBytes,
+                   int32_t bytesPerSample, int32_t bitDepth) noexcept {
+    const uint16_t maxSample = (bitDepth > 8 && bitDepth < 16)
+        ? static_cast<uint16_t>((1U << bitDepth) - 1U)
+        : 0xFFFFU;
     for (int r = 0; r < rows; ++r) {
-        std::memcpy(dst + static_cast<ptrdiff_t>(r) * dstStride,
-                    src + static_cast<size_t>(r) * srcStride,
-                    widthBytes);
+        uint8_t* dstRow = dst + static_cast<ptrdiff_t>(r) * dstStride;
+        std::memcpy(dstRow, src + static_cast<size_t>(r) * srcStride, widthBytes);
+        if (bytesPerSample == 2 && maxSample < 0xFFFFU) {
+            auto* samples = reinterpret_cast<uint16_t*>(dstRow);
+            const uint32_t count = widthBytes / 2U;
+            for (uint32_t i = 0; i < count; ++i) {
+                if (samples[i] > maxSample) {
+                    samples[i] = maxSample;
+                }
+            }
+        }
     }
 }
 
@@ -372,7 +384,7 @@ CoreStatus copyFramePlanes(const RawVideoFrame& src, const PixelFormatMapping& m
         if (!isValidSourcePlane(src, p, dst, rows, widthBytes)) {
             return CoreStatus::InvalidArgument;
         }
-        copyPlaneRows(src.planes[p].data(), src.rowBytes[p], dst->data[p], dst->linesize[p], rows, widthBytes);
+        copyPlaneRows(src.planes[p].data(), src.rowBytes[p], dst->data[p], dst->linesize[p], rows, widthBytes, map.bytesPerSample, src.bitDepth > 8 ? src.bitDepth : 10);
     }
     return CoreStatus::Ok;
 }
