@@ -1,5 +1,6 @@
-# CTest script verifying OpenMediaCore, OpenMedia_Importer, and OpenMedia_Exporter
-# CMake target configuration and platform-specific .prm / .bundle suffix rules.
+# CTest script verifying OpenMediaCore, OpenMedia_Importer, OpenMedia_ImporterHP,
+# and OpenMedia_Exporter CMake target configuration, Release IPO/LTCG, SIMD flags,
+# Windows PE security linker flags, and platform-specific .prm / .bundle suffix rules.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -21,9 +22,21 @@ endfunction()
 assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "openmedia_apply_warnings" "warning function")
 assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "-Wall -Wextra -Wpedantic" "GCC/Clang warnings")
 assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "/W4" "MSVC warnings")
+assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "openmedia_apply_simd_and_security" "SIMD/security function")
+assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "/arch:AVX2" "MSVC AVX2 flag")
+assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "-mavx2" "GCC/Clang AVX2 flag")
+assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "-msse4.1" "GCC/Clang SSE4.1 flag")
+assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "/DYNAMICBASE" "Windows PE DYNAMICBASE flag")
+assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "/NXCOMPAT" "Windows PE NXCOMPAT flag")
+assert_file_contains("${SOURCE_DIR}/cmake/CompilerWarnings.cmake" "/HIGHENTROPYVA" "Windows PE HIGHENTROPYVA flag")
+
 assert_file_contains("${SOURCE_DIR}/CMakeLists.txt" "SUFFIX \".prm\"" "Windows .prm suffix")
 assert_file_contains("${SOURCE_DIR}/CMakeLists.txt" "SUFFIX \".bundle\"" "macOS .bundle suffix")
 assert_file_contains("${SOURCE_DIR}/CMakeLists.txt" "BUNDLE TRUE" "macOS bundle property")
+assert_file_contains("${SOURCE_DIR}/CMakeLists.txt" "OpenMedia_ImporterHP" "High-priority importer companion target")
+assert_file_contains("${SOURCE_DIR}/CMakeLists.txt" "OPENMEDIA_HIGH_PRIORITY_SHIM=1" "High-priority shim compile definition")
+assert_file_contains("${SOURCE_DIR}/CMakeLists.txt" "CheckIPOSupported" "Release IPO/LTCG support check")
+assert_file_contains("${SOURCE_DIR}/CMakeLists.txt" "CMAKE_INTERPROCEDURAL_OPTIMIZATION" "Release IPO/LTCG enablement")
 
 set(TEST_BUILD_DIR "${BINARY_DIR}/_test_cmake_targets_build")
 file(REMOVE_RECURSE "${TEST_BUILD_DIR}")
@@ -57,6 +70,7 @@ endif()
 
 set(FOUND_CORE FALSE)
 set(FOUND_IMPORTER FALSE)
+set(FOUND_IMPORTER_HP FALSE)
 set(FOUND_EXPORTER FALSE)
 
 foreach(json_file IN LISTS TARGET_JSON_FILES)
@@ -80,6 +94,16 @@ foreach(json_file IN LISTS TARGET_JSON_FILES)
         elseif(APPLE AND NOT name_on_disk MATCHES "OpenMedia_Importer\\.bundle")
             message(FATAL_ERROR "Expected .bundle suffix for OpenMedia_Importer on APPLE, got ${name_on_disk}")
         endif()
+    elseif(target_name STREQUAL "OpenMedia_ImporterHP")
+        set(FOUND_IMPORTER_HP TRUE)
+        if(NOT target_type STREQUAL "MODULE_LIBRARY")
+            message(FATAL_ERROR "Expected OpenMedia_ImporterHP to be MODULE_LIBRARY, got ${target_type}")
+        endif()
+        if(WIN32 AND NOT name_on_disk STREQUAL "OpenMedia_ImporterHP.prm")
+            message(FATAL_ERROR "Expected OpenMedia_ImporterHP.prm on WIN32, got ${name_on_disk}")
+        elseif(APPLE AND NOT name_on_disk MATCHES "OpenMedia_ImporterHP\\.bundle")
+            message(FATAL_ERROR "Expected .bundle suffix for OpenMedia_ImporterHP on APPLE, got ${name_on_disk}")
+        endif()
     elseif(target_name STREQUAL "OpenMedia_Exporter")
         set(FOUND_EXPORTER TRUE)
         if(NOT target_type STREQUAL "MODULE_LIBRARY")
@@ -93,8 +117,8 @@ foreach(json_file IN LISTS TARGET_JSON_FILES)
     endif()
 endforeach()
 
-if(NOT FOUND_CORE OR NOT FOUND_IMPORTER OR NOT FOUND_EXPORTER)
-    message(FATAL_ERROR "Missing expected targets: Core=${FOUND_CORE}, Importer=${FOUND_IMPORTER}, Exporter=${FOUND_EXPORTER}")
+if(NOT FOUND_CORE OR NOT FOUND_IMPORTER OR NOT FOUND_IMPORTER_HP OR NOT FOUND_EXPORTER)
+    message(FATAL_ERROR "Missing expected targets: Core=${FOUND_CORE}, Importer=${FOUND_IMPORTER}, ImporterHP=${FOUND_IMPORTER_HP}, Exporter=${FOUND_EXPORTER}")
 endif()
 
 file(REMOVE_RECURSE "${TEST_BUILD_DIR}")
