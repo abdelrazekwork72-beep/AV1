@@ -44,11 +44,33 @@ jobs:
       - name: Run Clean-Room License & GPL Contamination Audit
         run: python packaging/scripts/audit_licenses.py
 
-      - name: Configure CMake (Release)
-        run: >
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DADOBE_PP_SDK="${{ github.workspace }}/tests/mocks/mock_sdk"
+      - name: Download & Install FFmpeg Shared Development Libraries (Windows x64)
+        shell: pwsh
+        run: |
+          $ffmpegZip = Join-Path $env:RUNNER_TEMP "ffmpeg-shared-win64.zip"
+          $ffmpegExtract = Join-Path $env:RUNNER_TEMP "ffmpeg-sdk"
+          New-Item -ItemType Directory -Force -Path $ffmpegExtract | Out-Null
+
+          $ffmpegUrl = "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip"
+          Write-Host "Downloading FFmpeg shared SDK from $ffmpegUrl ..."
+          Invoke-WebRequest -Uri $ffmpegUrl -OutFile $ffmpegZip -UseBasicParsing
+
+          Expand-Archive -Path $ffmpegZip -DestinationPath $ffmpegExtract -Force
+          $ffmpegRoot = (Get-ChildItem -Path $ffmpegExtract -Directory | Select-Object -First 1).FullName
+          if (-not (Test-Path (Join-Path $ffmpegRoot "include/libavcodec/avcodec.h"))) {
+              throw "FFmpeg headers not found under $ffmpegRoot"
+          }
+          Write-Host "FFMPEG_ROOT resolved to: $ffmpegRoot"
+          echo "FFMPEG_ROOT=$ffmpegRoot" >> $env:GITHUB_ENV
+          echo "$ffmpegRoot\bin" >> $env:GITHUB_PATH
+
+      - name: Configure CMake (Release with FFmpeg Shared Engine)
+        shell: pwsh
+        run: |
+          cmake -S . -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DFFMPEG_ROOT="$env:FFMPEG_ROOT" `
+            -DADOBE_PP_SDK="${{ github.workspace }}/tests/mocks/mock_sdk"
 
       - name: Build OpenMediaCore, Dual-PRM Importers (.prm), Exporter (.prm) & Test Suite
         run: cmake --build build --config Release --parallel
@@ -66,9 +88,14 @@ jobs:
           Copy-Item "build/bin/OpenMedia_ImporterHP.prm" -Destination $stageDir -Force
           Copy-Item "build/bin/OpenMedia_Exporter.prm" -Destination $stageDir -Force
           Copy-Item "build/bin/OpenMediaCore.dll" -Destination $stageDir -Force
+          Copy-Item "build/bin/av*.dll" -Destination $stageDir -Force
+          Copy-Item "build/bin/sw*.dll" -Destination $stageDir -Force
           Copy-Item "packaging/Config.toml" -Destination $stageDir -Force
           Copy-Item "THIRD_PARTY_LICENSES.md" -Destination $stageDir -Force
           Copy-Item "README.md" -Destination $stageDir -Force
+
+          Write-Host "Staged files for packaging:"
+          Get-ChildItem $stageDir | Select-Object Name, Length
 
           Compress-Archive -Path "$stageDir/*" -DestinationPath "${{ matrix.portable_name }}" -Force
 
@@ -89,7 +116,7 @@ jobs:
               throw "NSIS installer generation failed"
           }
 
-          Get-ChildItem "${{ matrix.installer_name }}", "${{ matrix.portable_name }}"
+          Get-ChildItem "${{ matrix.installer_name }}", "${{ matrix.portable_name }}" | Select-Object Name, Length
 
       - name: Upload Release Package Artifact (${{ matrix.platform_name }})
         uses: actions/upload-artifact@v4
@@ -143,19 +170,19 @@ jobs:
             release-assets/SHA256SUMS.txt
           body: |
             ## OpenMedia Premiere Pro & Adobe Media Encoder Plugin (`${{ steps.tag.outputs.tag_name }}` — Windows x64)
-            Native **MKV / WebM / Ogg** Dual-PRM Importer (`VP9`, `AV1`, `Opus`, `Vorbis`, `FLAC`, `xHE-AAC`, `PCM`) and **AV1 / VP9** Exporter (`SVT-AV1`, `libaom-av1`, `libvpx-vp9`, `NVENC`, `AMF`, `QSV`) for Adobe Premiere Pro & Adobe Media Encoder on Windows x64.
+            Native **MKV / WebM / Ogg** Dual-PRM Importer (`VP9`, `AV1`, `Opus`, `Vorbis`, `FLAC`, `xHE-AAC`, `PCM`) and **AV1 / VP9** Exporter (`SVT-AV1`, `libaom-av1`, `libvpx-vp9`, `NVENC`, `AMF`, `QSV`, `Vulkan`) for Adobe Premiere Pro & Adobe Media Encoder on Windows x64.
 
             ### Included Release Assets
-            - **`OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Setup.exe`** (Standalone Native Windows x64 NSIS Installer):
+            - **`OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Setup.exe`** (Standalone Native Windows x64 NSIS Installer with Bundled FFmpeg/Codec Runtime DLLs):
               - Requests Administrator privileges (`RequestExecutionLevel admin`) and supports silent enterprise deployment (`/S`).
               - Verifies Microsoft Visual C++ 2015–2022 Redistributable (x64) (`$SYSDIR\VCRUNTIME140.dll` & `$SYSDIR\VCRUNTIME140_1.dll`) before installation.
               - Installs directly into `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`:
-                1. `OpenMedia_Importer.prm` (Normal Priority `0x00`, `xImportEntry`)
-                2. `OpenMedia_ImporterHP.prm` (High-Priority Override `0x01`, `xImportEntry`)
-                3. `OpenMedia_Exporter.prm` (AV1 / VP9 / MKV / WebM Exporter, `xSDKExport`)
-                4. `OpenMediaCore.dll` (Shared C++17 / FFmpeg 7.1+ Core Engine)
+                1. `OpenMedia_Importer.prm` (Normal Priority `100` / `0x00`, `xImportEntry` with full 14-selector media & async pipeline)
+                2. `OpenMedia_ImporterHP.prm` (High-Priority Override `200` / `0x01`, `xImportEntry`)
+                3. `OpenMedia_Exporter.prm` (AV1 / VP9 / MKV / WebM Exporter, `xSDKExport` with `PiPL`/`EXPT` resources)
+                4. `OpenMediaCore.dll` + Full FFmpeg Shared Codec Engine (`avcodec-*.dll`, `avformat-*.dll`, `avutil-*.dll`, `swscale-*.dll`, `swresample-*.dll`, `avfilter-*.dll`, `avdevice-*.dll`)
                 5. `Config.toml` (Default Influx-v2 Dual-PRM & GPU Decode Policy configuration)
                 6. `THIRD_PARTY_LICENSES.md` & `README.md`
               - Registers `Uninstall-OpenMedia.exe` in Windows Add/Remove Programs.
-            - **`OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Portable.zip`** (Portable archive containing the compiled `.prm` plugins, `OpenMediaCore.dll`, `Config.toml`, `THIRD_PARTY_LICENSES.md`, and `README.md`).
+            - **`OpenMedia-PremierePlugin-v2.0.0-Windows-x64-Portable.zip`** (Complete portable archive containing `.prm` plugins, `OpenMediaCore.dll`, all FFmpeg/codec `.dll` libraries, `Config.toml`, `THIRD_PARTY_LICENSES.md`, and `README.md`).
             - **`SHA256SUMS.txt`** (SHA-256 cryptographic checksums).

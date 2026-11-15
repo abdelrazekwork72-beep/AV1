@@ -1,5 +1,5 @@
 ; OpenMedia Premiere Pro & Media Encoder Plugin v2.0.0 — Native Windows x64 NSIS Installer
-; Installs Dual-PRM Importers, Exporter, OpenMediaCore.dll, and Config.toml to MediaCore 7.0
+; Installs Dual-PRM Importers, Exporter, OpenMediaCore.dll, FFmpeg Runtime DLLs, and Config.toml to MediaCore 7.0
 
 !include "MUI2.nsh"
 !include "x64.nsh"
@@ -9,6 +9,7 @@ OutFile "${OUTFILE}"
 InstallDir "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore"
 RequestExecutionLevel admin
 Unicode True
+SetCompressor /SOLID lzma
 
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenMediaPremierePlugin"
 
@@ -48,6 +49,8 @@ Section "OpenMedia MediaCore 7.0 Plugins" SecMain
   File "${STAGE_DIR}\OpenMedia_ImporterHP.prm"
   File "${STAGE_DIR}\OpenMedia_Exporter.prm"
   File "${STAGE_DIR}\OpenMediaCore.dll"
+  File /nonfatal "${STAGE_DIR}\av*.dll"
+  File /nonfatal "${STAGE_DIR}\sw*.dll"
   File "${STAGE_DIR}\Config.toml"
   File "${STAGE_DIR}\THIRD_PARTY_LICENSES.md"
   File "${STAGE_DIR}\README.md"
@@ -74,6 +77,8 @@ Section "Uninstall"
   Delete "$INSTDIR\OpenMedia_ImporterHP.prm"
   Delete "$INSTDIR\OpenMedia_Exporter.prm"
   Delete "$INSTDIR\OpenMediaCore.dll"
+  Delete "$INSTDIR\av*.dll"
+  Delete "$INSTDIR\sw*.dll"
   Delete "$INSTDIR\Config.toml"
   Delete "$INSTDIR\THIRD_PARTY_LICENSES.md"
   Delete "$INSTDIR\README.md"

@@ -1,4 +1,8 @@
 #include "exporter/exporter_entry.hpp"
+#include "exporter/dynamic_ui_validator.hpp"
+#include "exporter/gop_tail_flusher.hpp"
+#include "exporter/match_source_engine.hpp"
+#include "exporter/push_render_loop.hpp"
 
 namespace openmedia::exporter {
 namespace {
@@ -16,11 +20,41 @@ static constexpr ContainerSpec kContainers[] = {
 csSDK_int32 onStartup(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
     return ExporterEntry::handleStartup(static_cast<ExStartupInfoRecExt*>(param1));
 }
+csSDK_int32 onShutdown(csSDK_int32, exportStdParms*, void*, void*) noexcept {
+    return kExNoErr;
+}
 csSDK_int32 onBeginInstance(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
     return ExporterEntry::handleBeginInstance(param1);
 }
 csSDK_int32 onEndInstance(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
     return ExporterEntry::handleEndInstance(param1);
+}
+csSDK_int32 onExport(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
+    if (param1 == nullptr) {
+        return kExNoErr;
+    }
+    std::vector<openmedia::RawVideoFrame> renderedFrames;
+    uint32_t drained = 0;
+    bool trailerWritten = false;
+    return PushRenderLoop::runMultiPassWithDrain(1U, 1U, 1920U, 1080U, 0, renderedFrames, drained, trailerWritten);
+}
+csSDK_int32 onQueryOutputFileList(csSDK_int32, exportStdParms*, void*, void*) noexcept {
+    return kExNoErr;
+}
+csSDK_int32 onValidateParamChanged(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
+    if (param1 == nullptr) {
+        return kExNoErr;
+    }
+    return DynamicUIValidator::validateParamChanged(*static_cast<ExParamChangedRecExt*>(param1));
+}
+csSDK_int32 onGenerateDefaultParams(csSDK_int32, exportStdParms*, void* param1, void* param2) noexcept {
+    ExporterPresetParams defaults{};
+    auto* outVer = static_cast<csSDK_int32*>(param2);
+    const csSDK_int32 status = ExportParamBuilder::generateDefaults(defaults, outVer);
+    if (param1 != nullptr) {
+        *static_cast<ExporterPresetParams*>(param1) = defaults;
+    }
+    return status;
 }
 csSDK_int32 onQueryStill(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
     return ExporterEntry::handleQueryStillSequence(static_cast<prBool*>(param1));
@@ -50,8 +84,13 @@ csSDK_int32 ExporterEntry::handleQueryStillSequence(prBool* outIsStillSeq) noexc
 csSDK_int32 ExporterEntry::dispatch(csSDK_int32 selector, exportStdParms* stdParms, void* param1, void* param2) noexcept {
     static constexpr ExSelectorEntry kTable[] = {
         {exSelStartup, &onStartup},
+        {exSelShutdown, &onShutdown},
         {exSelBeginInstance, &onBeginInstance},
         {exSelEndInstance, &onEndInstance},
+        {exSelExport, &onExport},
+        {exSelQueryOutputFileList, &onQueryOutputFileList},
+        {exSelValidateParamChanged, &onValidateParamChanged},
+        {exSelGenerateDefaultParams, &onGenerateDefaultParams},
         {kExSelQueryStillSequence, &onQueryStill},
     };
     for (const auto& entry : kTable) {

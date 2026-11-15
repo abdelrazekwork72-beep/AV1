@@ -6,7 +6,11 @@
 #include "exporter/exporter_types.hpp"
 
 #ifndef DllExport
-#define DllExport
+#ifdef _WIN32
+#define DllExport __declspec(dllexport)
+#else
+#define DllExport __attribute__((visibility("default")))
+#endif
 #endif
 
 /// @brief Selector constant for exSelQueryStillSequence when not provided by minimal mock SDK.
