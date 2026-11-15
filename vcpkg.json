@@ -19,6 +19,8 @@
         "vpx",
         "opus",
         "flac",
+        "vorbis",
+        "mp3lame",
         "nvcodec",
         "vulkan"
       ]

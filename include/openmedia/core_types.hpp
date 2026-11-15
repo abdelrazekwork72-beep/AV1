@@ -50,7 +50,12 @@ enum class CodecId {
     Vorbis,
     PCM,
     SRT,
-    WebVTT
+    WebVTT,
+    XHE_AAC,
+    AAC,
+    MP3,
+    AC3,
+    DTS
 };
 
 /// @brief Supported pixel formats for raw decoded/encoded video frames.
@@ -107,7 +112,8 @@ enum class CoreStatus {
     EncodeFailed,
     SeekFailed,
     UnsupportedCodec,
-    NotInitialized
+    NotInitialized,
+    NoDecodableFrames
 };
 
 /// @brief Metadata describing a single container stream.
