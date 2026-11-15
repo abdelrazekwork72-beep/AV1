@@ -1,5 +1,8 @@
 #include "exporter/push_render_loop.hpp"
+#include "exporter/gop_tail_flusher.hpp"
+
 namespace openmedia::exporter {
+
 csSDK_int32 PushRenderLoop::runMultiPass(uint32_t passes, uint32_t totalFrames,
                                          uint32_t width, uint32_t height,
                                          std::vector<RawVideoFrame>& outCopiedFrames) {
@@ -22,4 +25,38 @@ csSDK_int32 PushRenderLoop::runMultiPass(uint32_t passes, uint32_t totalFrames,
     }
     return kExNoErr;
 }
+
+void PushRenderLoop::normalizeFrameTimestamps(std::vector<RawVideoFrame>& frames) noexcept {
+    if (frames.empty()) {
+        return;
+    }
+    const int64_t basePts = frames.front().pts;
+    for (auto& frame : frames) {
+        frame.pts = (frame.pts > basePts) ? (frame.pts - basePts) : 0;
+    }
+}
+
+csSDK_int32 PushRenderLoop::runMultiPassWithDrain(uint32_t passes, uint32_t totalFrames,
+                                                  uint32_t width, uint32_t height,
+                                                  int64_t initialPtsOffset,
+                                                  std::vector<RawVideoFrame>& outCopiedFrames,
+                                                  uint32_t& outDrainedFrames,
+                                                  bool& outTrailerWritten) {
+    const csSDK_int32 status = runMultiPass(passes, totalFrames, width, height, outCopiedFrames);
+    if (status != kExNoErr) {
+        return status;
+    }
+    for (auto& frame : outCopiedFrames) {
+        frame.pts += initialPtsOffset;
+    }
+    normalizeFrameTimestamps(outCopiedFrames);
+    std::vector<RawVideoFrame> tailBuffer;
+    if (!outCopiedFrames.empty()) {
+        tailBuffer.push_back(std::move(outCopiedFrames.back()));
+        outCopiedFrames.pop_back();
+    }
+    outDrainedFrames = static_cast<uint32_t>(tailBuffer.size());
+    return GopTailFlusher::drainAtEof(tailBuffer, outCopiedFrames, outTrailerWritten);
+}
+
 } // namespace openmedia::exporter
