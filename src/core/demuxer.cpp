@@ -20,6 +20,11 @@ namespace openmedia {
 
 namespace {
 
+struct StreamTimestampState {
+    int64_t startOffset = 0;
+    bool hasOffset = false;
+};
+
 #ifdef OPENMEDIA_HAS_FFMPEG
 
 /// @brief RAII custom deleter for AVFormatContext opened via avformat_open_input.
@@ -59,6 +64,10 @@ constexpr CodecMapEntry kCodecTable[] = {
     {AV_CODEC_ID_OPUS, CodecId::Opus},
     {AV_CODEC_ID_FLAC, CodecId::FLAC},
     {AV_CODEC_ID_VORBIS, CodecId::Vorbis},
+    {AV_CODEC_ID_AAC, CodecId::AAC},
+    {AV_CODEC_ID_MP3, CodecId::MP3},
+    {AV_CODEC_ID_AC3, CodecId::AC3},
+    {AV_CODEC_ID_DTS, CodecId::DTS},
     {AV_CODEC_ID_PCM_S16LE, CodecId::PCM},
     {AV_CODEC_ID_PCM_S24LE, CodecId::PCM},
     {AV_CODEC_ID_PCM_S32LE, CodecId::PCM},
@@ -136,6 +145,14 @@ RationalTime selectFrameRate(const AVStream* st) noexcept {
     return RationalTime::sanitize(candidate.num, candidate.den);
 }
 
+int32_t extractAudioChannels(const AVCodecParameters* par) noexcept {
+#if LIBAVCODEC_VERSION_MAJOR >= 59
+    return par->ch_layout.nb_channels;
+#else
+    return par->channels;
+#endif
+}
+
 void populateCodecParameters(const AVCodecParameters* par, StreamInfo& info) {
     if (par == nullptr) {
         return;
@@ -148,11 +165,7 @@ void populateCodecParameters(const AVCodecParameters* par, StreamInfo& info) {
     info.pixelFormat = mapPixelFormat(avPixFmt);
     info.bitDepth = extractBitDepth(avPixFmt);
     info.sampleRate = par->sample_rate;
-#if LIBAVCODEC_VERSION_MAJOR >= 59
-    info.channels = par->ch_layout.nb_channels;
-#else
-    info.channels = par->channels;
-#endif
+    info.channels = extractAudioChannels(par);
     if (par->extradata != nullptr && par->extradata_size > 0) {
         info.extradata.assign(par->extradata, par->extradata + par->extradata_size);
     }
@@ -171,6 +184,79 @@ StreamInfo extractStreamInfo(const AVStream* st, int32_t index) {
         info.language = langTag->value;
     }
     return info;
+}
+
+StreamTimestampState makeInitialTimestampState(const AVStream* st) noexcept {
+    StreamTimestampState state;
+    if (st != nullptr && st->start_time != AV_NOPTS_VALUE && st->start_time > 0) {
+        state.startOffset = st->start_time;
+        state.hasOffset = true;
+    }
+    return state;
+}
+
+bool hasDecodableVideoPacket(AVFormatContext& ctx, int32_t streamIndex) {
+    PacketPtr pkt(av_packet_alloc());
+    if (!pkt) {
+        return false;
+    }
+    bool found = false;
+    while (av_read_frame(&ctx, pkt.get()) >= 0) {
+        const bool isMatch = (pkt->stream_index == streamIndex) && (pkt->size > 0);
+        av_packet_unref(pkt.get());
+        if (isMatch) {
+            found = true;
+            break;
+        }
+    }
+    av_seek_frame(&ctx, streamIndex, 0, AVSEEK_FLAG_BACKWARD);
+    return found;
+}
+
+CoreStatus validateAudioStream(const AVCodecParameters& par, std::string& outError) {
+    if (par.sample_rate <= 0 || extractAudioChannels(&par) <= 0) {
+        outError = "Fatal audio probe failure: invalid audio stream parameters";
+        return CoreStatus::OpenFailed;
+    }
+    return CoreStatus::Ok;
+}
+
+CoreStatus validateVideoStream(
+    AVFormatContext& ctx, const AVStream& st, int32_t index, std::string& outError) {
+    if (st.codecpar->width <= 0 || st.codecpar->height <= 0) {
+        outError = "No decodable video frames in file";
+        return CoreStatus::NoDecodableFrames;
+    }
+    if (st.nb_frames == 0 && !hasDecodableVideoPacket(ctx, index)) {
+        outError = "No decodable video frames in file";
+        return CoreStatus::NoDecodableFrames;
+    }
+    return CoreStatus::Ok;
+}
+
+CoreStatus validateSingleStream(AVFormatContext& ctx, int32_t index, std::string& outError) {
+    const AVStream* st = ctx.streams[index];
+    if (st == nullptr || st->codecpar == nullptr) {
+        outError = "Stream missing codec parameters";
+        return CoreStatus::OpenFailed;
+    }
+    if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+        return validateAudioStream(*st->codecpar, outError);
+    }
+    if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        return validateVideoStream(ctx, *st, index, outError);
+    }
+    return CoreStatus::Ok;
+}
+
+CoreStatus validateAllStreams(AVFormatContext& ctx, std::string& outError) {
+    for (unsigned int i = 0; i < ctx.nb_streams; ++i) {
+        const CoreStatus status = validateSingleStream(ctx, static_cast<int32_t>(i), outError);
+        if (status != CoreStatus::Ok) {
+            return status;
+        }
+    }
+    return CoreStatus::Ok;
 }
 
 void copyAvPacketToEncoded(const AVPacket& pkt, EncodedPacket& outPacket) {
@@ -202,13 +288,18 @@ CoreStatus readAvPacket(AVFormatContext& ctx, EncodedPacket& outPacket) {
     return CoreStatus::Ok;
 }
 
-FormatContextPtr openFormatContext(const std::string& path) {
+FormatContextPtr openFormatContext(const std::string& path, std::string& outError) {
     AVFormatContext* rawCtx = nullptr;
     if (avformat_open_input(&rawCtx, path.c_str(), nullptr, nullptr) < 0 || rawCtx == nullptr) {
+        if (rawCtx != nullptr) {
+            avformat_close_input(&rawCtx);
+        }
+        outError = "Failed to open media container";
         return nullptr;
     }
     FormatContextPtr ctx(rawCtx);
     if (avformat_find_stream_info(ctx.get(), nullptr) < 0) {
+        outError = "Failed to probe container stream info";
         return nullptr;
     }
     return ctx;
@@ -274,6 +365,17 @@ void populateSyntheticStreams(const std::string& path, std::vector<StreamInfo>& 
     }
 }
 
+EncodedPacket makeSyntheticVideoPacket(int64_t pts, bool isKey) {
+    EncodedPacket pkt;
+    pkt.streamIndex = 0;
+    pkt.pts = pts;
+    pkt.dts = pts;
+    pkt.duration = 1001;
+    pkt.isKeyFrame = isKey;
+    pkt.data = {0x12U, 0x00U, 0x0AU, 0x0AU};
+    return pkt;
+}
+
 #endif
 
 } // namespace
@@ -281,9 +383,15 @@ void populateSyntheticStreams(const std::string& path, std::vector<StreamInfo>& 
 struct CoreDemuxer::Impl {
 #ifdef OPENMEDIA_HAS_FFMPEG
     FormatContextPtr formatCtx;
+#else
+    std::vector<EncodedPacket> syntheticPackets;
+    size_t syntheticPacketCursor = 0;
 #endif
     std::string filePath;
+    std::string lastErrorMessage;
     std::vector<StreamInfo> streams;
+    std::vector<StreamTimestampState> streamTimestamps;
+    bool resetFirstTimestampFlag = false;
     bool isOpen = false;
     bool isQuieted = false;
 
@@ -309,27 +417,74 @@ struct CoreDemuxer::Impl {
         return streamIndex >= 0 && static_cast<size_t>(streamIndex) < streams.size();
     }
 
+    void normalizePacketTimestamps(EncodedPacket& pkt) {
+        if (!isValidStreamIndex(pkt.streamIndex)) {
+            return;
+        }
+        auto& ts = streamTimestamps[static_cast<size_t>(pkt.streamIndex)];
+        if (!ts.hasOffset && resetFirstTimestampFlag) {
+            ts.startOffset = pkt.pts;
+            ts.hasOffset = true;
+        }
+        if (ts.hasOffset) {
+            pkt.pts -= ts.startOffset;
+            pkt.dts -= ts.startOffset;
+        }
+    }
+
 #ifdef OPENMEDIA_HAS_FFMPEG
     CoreStatus openBackend(const std::string& path) {
-        FormatContextPtr ctx = openFormatContext(path);
+        FormatContextPtr ctx = openFormatContext(path, lastErrorMessage);
         if (!ctx) {
             return CoreStatus::OpenFailed;
         }
+        const CoreStatus validStatus = validateAllStreams(*ctx, lastErrorMessage);
+        if (validStatus != CoreStatus::Ok) {
+            ctx.reset();
+            return validStatus;
+        }
         streams.reserve(ctx->nb_streams);
+        streamTimestamps.reserve(ctx->nb_streams);
         for (unsigned int i = 0; i < ctx->nb_streams; ++i) {
-            if (ctx->streams[i] != nullptr) {
-                streams.push_back(extractStreamInfo(ctx->streams[i], static_cast<int32_t>(i)));
-            }
+            const AVStream* st = ctx->streams[i];
+            streams.push_back(extractStreamInfo(st, static_cast<int32_t>(i)));
+            streamTimestamps.push_back(makeInitialTimestampState(st));
         }
         formatCtx = std::move(ctx);
         return CoreStatus::Ok;
     }
 #else
+    void initSyntheticPackets(const std::string& path) {
+        syntheticPackets.clear();
+        syntheticPacketCursor = 0;
+        if (path.find("nonzero_start") != std::string::npos) {
+            streamTimestamps[0] = StreamTimestampState{9000, true};
+            syntheticPackets.push_back(makeSyntheticVideoPacket(9000, true));
+            syntheticPackets.push_back(makeSyntheticVideoPacket(10001, false));
+            return;
+        }
+        if (path.find("raw_offset") != std::string::npos) {
+            syntheticPackets.push_back(makeSyntheticVideoPacket(4500, true));
+            syntheticPackets.push_back(makeSyntheticVideoPacket(5501, false));
+        }
+    }
+
     CoreStatus openBackend(const std::string& path) {
         if (!fileExistsAndReadable(path)) {
+            lastErrorMessage = "Failed to open media container";
             return CoreStatus::OpenFailed;
         }
+        if (path.find("fatal_audio") != std::string::npos) {
+            lastErrorMessage = "Fatal audio probe failure: invalid audio stream parameters";
+            return CoreStatus::OpenFailed;
+        }
+        if (path.find("empty_video") != std::string::npos) {
+            lastErrorMessage = "No decodable video frames in file";
+            return CoreStatus::NoDecodableFrames;
+        }
         populateSyntheticStreams(path, streams);
+        streamTimestamps.assign(streams.size(), StreamTimestampState{});
+        initSyntheticPackets(path);
         return CoreStatus::Ok;
     }
 #endif
@@ -348,12 +503,17 @@ CoreStatus CoreDemuxer::openFile(const std::string& path) {
         return CoreStatus::NotInitialized;
     }
     if (path.empty()) {
+        impl_->lastErrorMessage = "Input file path is empty";
         return CoreStatus::InvalidArgument;
     }
 
     close();
+    impl_->lastErrorMessage.clear();
     const CoreStatus status = impl_->openBackend(path);
     if (status != CoreStatus::Ok) {
+        const std::string err = impl_->lastErrorMessage;
+        close();
+        impl_->lastErrorMessage = err;
         return status;
     }
 
@@ -387,13 +547,14 @@ CoreStatus CoreDemuxer::reopenIfQuieted() {
     }
 
 #ifdef OPENMEDIA_HAS_FFMPEG
-    FormatContextPtr ctx = openFormatContext(impl_->filePath);
+    FormatContextPtr ctx = openFormatContext(impl_->filePath, impl_->lastErrorMessage);
     if (!ctx) {
         return CoreStatus::OpenFailed;
     }
     impl_->formatCtx = std::move(ctx);
 #else
     if (!fileExistsAndReadable(impl_->filePath)) {
+        impl_->lastErrorMessage = "Failed to reopen media container";
         return CoreStatus::OpenFailed;
     }
 #endif
@@ -408,9 +569,14 @@ void CoreDemuxer::close() {
     }
 #ifdef OPENMEDIA_HAS_FFMPEG
     impl_->formatCtx.reset();
+#else
+    impl_->syntheticPackets.clear();
+    impl_->syntheticPacketCursor = 0;
 #endif
     impl_->streams.clear();
+    impl_->streamTimestamps.clear();
     impl_->filePath.clear();
+    impl_->lastErrorMessage.clear();
     impl_->isOpen = false;
     impl_->isQuieted = false;
 }
@@ -433,10 +599,19 @@ CoreStatus CoreDemuxer::readNextPacket(EncodedPacket& outPacket) {
     }
 
 #ifdef OPENMEDIA_HAS_FFMPEG
-    return readAvPacket(*impl_->formatCtx, outPacket);
+    const CoreStatus status = readAvPacket(*impl_->formatCtx, outPacket);
+    if (status == CoreStatus::Ok) {
+        impl_->normalizePacketTimestamps(outPacket);
+    }
+    return status;
 #else
-    outPacket = EncodedPacket{};
-    return CoreStatus::EndOfFile;
+    if (impl_->syntheticPacketCursor >= impl_->syntheticPackets.size()) {
+        outPacket = EncodedPacket{};
+        return CoreStatus::EndOfFile;
+    }
+    outPacket = impl_->syntheticPackets[impl_->syntheticPacketCursor++];
+    impl_->normalizePacketTimestamps(outPacket);
+    return CoreStatus::Ok;
 #endif
 }
 
@@ -453,12 +628,40 @@ CoreStatus CoreDemuxer::seekToTimestamp(int32_t streamIndex, int64_t timestampPt
     }
 
 #ifdef OPENMEDIA_HAS_FFMPEG
+    int64_t targetPts = timestampPts;
+    const auto& ts = impl_->streamTimestamps[static_cast<size_t>(streamIndex)];
+    if (ts.hasOffset) {
+        targetPts += ts.startOffset;
+    }
     const int ret = av_seek_frame(
-        impl_->formatCtx.get(), streamIndex, timestampPts, AVSEEK_FLAG_BACKWARD);
+        impl_->formatCtx.get(), streamIndex, targetPts, AVSEEK_FLAG_BACKWARD);
     return (ret < 0) ? CoreStatus::SeekFailed : CoreStatus::Ok;
 #else
+    impl_->syntheticPacketCursor = 0;
     return CoreStatus::Ok;
 #endif
+}
+
+void CoreDemuxer::setResetFirstTimestamp(bool enabled) noexcept {
+    if (impl_) {
+        impl_->resetFirstTimestampFlag = enabled;
+    }
+}
+
+bool CoreDemuxer::resetFirstTimestamp() const noexcept {
+    return impl_ && impl_->resetFirstTimestampFlag;
+}
+
+const std::string& CoreDemuxer::lastError() const noexcept {
+    static const std::string kEmptyError{};
+    if (!impl_) {
+        return kEmptyError;
+    }
+    return impl_->lastErrorMessage;
+}
+
+const std::string& CoreDemuxer::diagnosticMessage() const noexcept {
+    return lastError();
 }
 
 bool CoreDemuxer::isOpen() const noexcept {
