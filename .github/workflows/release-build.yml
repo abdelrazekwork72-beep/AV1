@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release version tag to publish (e.g. v3.0.0)'
+        description: 'Release version tag to publish (e.g. v3.0.1)'
         required: false
-        default: 'v3.0.0'
+        default: 'v3.0.1'
 
 permissions:
   contents: write
@@ -29,8 +29,8 @@ jobs:
         include:
           - os: windows-latest
             platform_name: Windows-x64
-            installer_name: OpenMedia-PremierePlugin-v3.0.0-Windows-x64-Setup.exe
-            portable_name: OpenMedia-PremierePlugin-v3.0.0-Windows-x64-Portable.zip
+            installer_name: OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Setup.exe
+            portable_name: OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Portable.zip
 
     steps:
       - name: Checkout Repository
@@ -64,7 +64,7 @@ jobs:
           echo "FFMPEG_ROOT=$ffmpegRoot" >> $env:GITHUB_ENV
           echo "$ffmpegRoot\bin" >> $env:GITHUB_PATH
 
-      - name: Configure CMake (Release with FFmpeg Shared Engine)
+      - name: Configure CMake (Release with FFmpeg Shared Engine & MediaCore 7.0 x64 ABI)
         shell: pwsh
         run: |
           cmake -S . -B build `
@@ -72,10 +72,29 @@ jobs:
             -DFFMPEG_ROOT="$env:FFMPEG_ROOT" `
             -DADOBE_PP_SDK="${{ github.workspace }}/tests/mocks/mock_sdk"
 
-      - name: Build OpenMediaCore, Dual-PRM Importers (.prm), Exporter (.prm) & Test Suite
+      - name: Build OpenMediaCore, Dual-PRM Importers (.prm), Exporter (.prm), OpenMediaDesktop.exe & Test Suite
         run: cmake --build build --config Release --parallel
 
-      - name: Run Full CTest Suite (52/52 Unit, Integration, Benchmarks & Packaging)
+      - name: Verify PE Exports (xImportEntry / xSDKExport) & Binary PiPL (8BIM) Resources in Built .prm Binaries
+        shell: pwsh
+        run: |
+          foreach ($prm in @("build/bin/OpenMedia_Importer.prm", "build/bin/OpenMedia_ImporterHP.prm", "build/bin/OpenMedia_Exporter.prm")) {
+              if (-not (Test-Path $prm)) { throw "Missing built binary: $prm" }
+              $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $prm))
+              $ascii = [System.Text.Encoding]::ASCII.GetString($bytes)
+              if ($ascii -notmatch "MIB8" -and $ascii -notmatch "8BIM") {
+                  throw "Binary PiPL 8BIM signature missing in $prm"
+              }
+              if ($prm -match "Importer" -and $ascii -notmatch "xImportEntry") {
+                  throw "xImportEntry export missing in $prm"
+              }
+              if ($prm -match "Exporter" -and $ascii -notmatch "xSDKExport") {
+                  throw "xSDKExport export missing in $prm"
+              }
+              Write-Host "[PASS] Verified PE export and binary PiPL (8BIM) resource in $prm ($($bytes.Length) bytes)"
+          }
+
+      - name: Run Full CTest Suite (60/60 Unit, Integration, Benchmarks & Packaging)
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Build Standalone Windows .exe Installer (NSIS) & Portable ZIP
@@ -155,7 +174,7 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "tag_name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag_name=v3.0.0" >> "$GITHUB_OUTPUT"
+            echo "tag_name=v3.0.1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create or Update GitHub Release
@@ -166,25 +185,17 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            release-assets/OpenMedia-PremierePlugin-v3.0.0-Windows-x64-Setup.exe
-            release-assets/OpenMedia-PremierePlugin-v3.0.0-Windows-x64-Portable.zip
+            release-assets/OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Setup.exe
+            release-assets/OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Portable.zip
             release-assets/SHA256SUMS.txt
           body: |
             ## OpenMedia Premiere Pro & Adobe Media Encoder Plugin (`${{ steps.tag.outputs.tag_name }}` — Windows x64)
-            Native **MKV / WebM / Ogg** Dual-PRM Importer (`VP9`, `AV1`, `Opus`, `Vorbis`, `FLAC`, `xHE-AAC`, `PCM`) and **AV1 / VP9** Exporter (`SVT-AV1`, `libaom-av1`, `libvpx-vp9`, `NVENC`, `AMF`, `QSV`, `Vulkan`) for Adobe Premiere Pro & Adobe Media Encoder on Windows x64.
+            Binary-exact **Adobe MediaCore 7.0 x64 ABI** Dual-PRM Importer (`OpenMedia_Importer.prm` & `OpenMedia_ImporterHP.prm`), Exporter (`OpenMedia_Exporter.prm`), and Bilingual (**English LTR / Arabic RTL**) Control Center (`OpenMediaDesktop.exe`).
 
-            ### Included Release Assets
-            - **`OpenMedia-PremierePlugin-v3.0.0-Windows-x64-Setup.exe`** (Standalone Native Windows x64 NSIS Installer with Bundled FFmpeg/Codec Runtime DLLs):
-              - Requests Administrator privileges (`RequestExecutionLevel admin`) and supports silent enterprise deployment (`/S`).
-              - Verifies Microsoft Visual C++ 2015–2022 Redistributable (x64) (`$SYSDIR\VCRUNTIME140.dll` & `$SYSDIR\VCRUNTIME140_1.dll`) before installation.
-              - Installs directly into `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore`:
-                1. `OpenMedia_Importer.prm` (Normal Priority `100` / `0x00`, `xImportEntry` with full 14-selector media & async pipeline)
-                2. `OpenMedia_ImporterHP.prm` (High-Priority Override `200` / `0x01`, `xImportEntry`)
-                3. `OpenMedia_Exporter.prm` (AV1 / VP9 / MKV / WebM Exporter, `xSDKExport` with `PiPL`/`EXPT` resources)
-                4. `OpenMediaDesktop.exe` (Bilingual EN LTR / AR RTL Control Center & Host Popup)
-                5. `OpenMediaCore.dll` + Full FFmpeg Shared Codec Engine (`avcodec-*.dll`, `avformat-*.dll`, `avutil-*.dll`, `swscale-*.dll`, `swresample-*.dll`, `avfilter-*.dll`, `avdevice-*.dll`)
-                5. `Config.toml` (Default Influx-v2 Dual-PRM & GPU Decode Policy configuration)
-                6. `THIRD_PARTY_LICENSES.md` & `README.md`
-              - Registers `Uninstall-OpenMedia.exe` in Windows Add/Remove Programs.
-            - **`OpenMedia-PremierePlugin-v3.0.0-Windows-x64-Portable.zip`** (Complete portable archive containing `.prm` plugins, `OpenMediaCore.dll`, all FFmpeg/codec `.dll` libraries, `Config.toml`, `THIRD_PARTY_LICENSES.md`, and `README.md`).
-            - **`SHA256SUMS.txt`** (SHA-256 cryptographic checksums).
+            ### Key Fixes in `v3.0.1`
+            - **Real Premiere Pro / Media Encoder x64 Selector & Return-Code ABI**: Aligned all importer (`imInit=0..imGetIndColorSpace=73`, `malSupports8=101`, `imBadFormatIndex=301`) and exporter (`exSelStartup=0..exSelValidateOutputSettings=13`) selectors and `#pragma pack(4)` binary struct offsets (`PrRawImportInfoRec`, `PrRawIndFormatRec` `0x2FC` bytes, `PrRawOpenFileRefRec8`, `PrRawSourceVideoRec`).
+            - **Binary `PiPL` (`8BIM`) & `IMPT`/`EXPT` Resource Tables**: Embedded little-endian `8BIM` property lists (`kind`, `name`, `eMNA`) and 4-byte `IMPT`/`EXPT` headers verified by CI PE inspection gate.
+            - **Included Assets**:
+              - `OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Setup.exe`
+              - `OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Portable.zip`
+              - `SHA256SUMS.txt`

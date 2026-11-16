@@ -1,9 +1,11 @@
 #pragma once
 /// @file importer_types.hpp
-/// @brief Shared clean-room Adobe MediaCore Importer bridge types, selectors, and constants for Module 2.
+/// @brief Shared Adobe MediaCore Importer bridge types, official selectors, return codes,
+///        and binary-aligned host structs for Module 2 (Premiere Pro / Media Encoder x64 ABI).
 
 #include "openmedia/core_types.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -36,30 +38,63 @@ inline constexpr uint32_t kOpenMediaImporterFourCC = 0x4F4D4950U;
 static_assert(kOpenMediaImporterFourCC != 0x4D4F6F76U,
               "FourCC must not collide with After Effects reserved 0x4D4F6F76");
 
-/// @brief Extended MediaCore Importer selectors beyond minimal mock_sdk PrSDKImport.h.
-inline constexpr csSDK_int32 kSelInit = imInit;
-inline constexpr csSDK_int32 kSelShutdown = imShutdown;
-inline constexpr csSDK_int32 kSelGetInfo8 = imGetInfo8;
-inline constexpr csSDK_int32 kSelOpenFile8 = imOpenFile8;
-inline constexpr csSDK_int32 kSelCloseFile = imCloseFile;
-inline constexpr csSDK_int32 kSelGetIndFormat = imGetIndFormat;
-inline constexpr csSDK_int32 kSelGetSourceVideo = imGetSourceVideo;
-inline constexpr csSDK_int32 kSelGetIndPixelFormat = 8;
-inline constexpr csSDK_int32 kSelImportAudio7 = 9;
-inline constexpr csSDK_int32 kSelGetPeakAudio = 10;
-inline constexpr csSDK_int32 kSelGetAudioChannelLayout = 11;
-inline constexpr csSDK_int32 kSelCreateAsyncImporter = 12;
-inline constexpr csSDK_int32 kSelQuietFile = 13;
-inline constexpr csSDK_int32 kSelGetPrefs8 = 14;
+/// @brief Official Adobe Premiere Pro MediaCore Importer Selectors (0..82) + Legacy Mock Aliases.
+inline constexpr csSDK_int32 kSelInit = 0;                       // imInit
+inline constexpr csSDK_int32 kSelShutdown = 1;                   // imShutdown
+inline constexpr csSDK_int32 kSelImportImage = 5;                // imImportImage
+inline constexpr csSDK_int32 kSelQuietFile = 8;                  // imQuietFile (official)
+inline constexpr csSDK_int32 kSelCloseFile = 9;                  // imCloseFile (official)
+inline constexpr csSDK_int32 kSelAnalysis = 12;                  // imAnalysis
+inline constexpr csSDK_int32 kSelDataRateAnalysis = 13;          // imDataRateAnalysis
+inline constexpr csSDK_int32 kSelGetIndFormat = 14;              // imGetIndFormat (official)
+inline constexpr csSDK_int32 kSelGetMetaData = 23;               // imGetMetaData
+inline constexpr csSDK_int32 kSelSetMetaData = 24;               // imSetMetaData
+inline constexpr csSDK_int32 kSelImportAudio7 = 25;              // imImportAudio7 (official)
+inline constexpr csSDK_int32 kSelGetIndPixelFormat = 27;         // imGetIndPixelFormat (official)
+inline constexpr csSDK_int32 kSelGetSupports7 = 28;              // imGetSupports7 (official)
+inline constexpr csSDK_int32 kSelGetSupports8 = 36;              // imGetSupports8 (official)
+inline constexpr csSDK_int32 kSelGetInfo8 = 37;                  // imGetInfo8 (official)
+inline constexpr csSDK_int32 kSelGetPrefs8 = 38;                 // imGetPrefs8 (official)
+inline constexpr csSDK_int32 kSelOpenFile8 = 39;                 // imOpenFile8 (official)
+inline constexpr csSDK_int32 kSelGetPreferredFrameSize = 45;     // imGetPreferredFrameSize (official)
+inline constexpr csSDK_int32 kSelCreateAsyncImporter = 46;       // imCreateAsyncImporter (official)
+inline constexpr csSDK_int32 kSelGetSourceVideo = 47;            // imGetSourceVideo (official)
+inline constexpr csSDK_int32 kSelGetPeakAudio = 49;              // imGetPeakAudio (official)
+inline constexpr csSDK_int32 kSelGetTimeInfo8 = 52;              // imGetTimeInfo8 (official)
+inline constexpr csSDK_int32 kSelSetTimeInfo8 = 53;              // imSetTimeInfo8 (official)
+inline constexpr csSDK_int32 kSelGetAudioChannelLayout = 64;     // imGetAudioChannelLayout (official)
+inline constexpr csSDK_int32 kSelSelectClipFrameDescriptor = 65; // imSelectClipFrameDescriptor (official)
+inline constexpr csSDK_int32 kSelGetIndColorSpace = 73;          // imGetIndColorSpace (official)
+inline constexpr csSDK_int32 kSelGetInfo9 = 81;                  // imGetInfo9 (official)
 
-/// @brief Extended MediaCore Importer return codes.
-inline constexpr csSDK_int32 kImNoErr = malNoError;
-inline constexpr csSDK_int32 kImUnsupported = imUnsupported;
-inline constexpr csSDK_int32 kImMemErr = imMemErr;
-inline constexpr csSDK_int32 kImBadFile = 1001;
-inline constexpr csSDK_int32 kImBadFormatIndex = 1002;
-inline constexpr csSDK_int32 kImIterateStreams = 1003;
-inline constexpr csSDK_int32 kImBadStreamIndex = 1004;
+/// @brief Official Adobe Premiere Pro MediaCore Importer Return Codes (prMalError).
+inline constexpr csSDK_int32 kImNoErr = 0;                       // imNoErr / malNoError
+inline constexpr csSDK_int32 kImTooWide = 1;                     // imTooWide
+inline constexpr csSDK_int32 kImBadFile = 2;                     // imBadFile (official)
+inline constexpr csSDK_int32 kImUnsupported = 3;                 // imUnsupported (official)
+inline constexpr csSDK_int32 kImMemErr = 4;                      // imMemErr (official)
+inline constexpr csSDK_int32 kImOtherErr = 5;                    // imOtherErr
+inline constexpr csSDK_int32 kImNoContent = 6;                   // imNoContent
+inline constexpr csSDK_int32 kImBadCodec = 9;                    // imBadCodec
+inline constexpr csSDK_int32 kImNoTimecode = 12;                 // imNoTimecode
+inline constexpr csSDK_int32 kImIterateStreams = 18;             // imIterateStreams (official)
+inline constexpr csSDK_int32 kImBadStreamIndex = 19;             // imBadStreamIndex (official)
+inline constexpr csSDK_int32 kImIterateFrameSizes = 24;          // imIterateFrameSizes
+inline constexpr csSDK_int32 kImFrameNotFound = 28;              // imFrameNotFound
+inline constexpr csSDK_int32 kImBadHeader = 29;                  // imBadHeader
+inline constexpr csSDK_int32 kImFileOpenFailed = 31;             // imFileOpenFailed
+inline constexpr csSDK_int32 kImFileHasNoImportableStreams = 32; // imFileHasNoImportableStreams
+inline constexpr csSDK_int32 kImUnsupportedAudioFormat = 34;     // imUnsupportedAudioFormat
+inline constexpr csSDK_int32 kImDecompressionError = 36;         // imDecompressionError
+inline constexpr csSDK_int32 kImInvalidPreferences = 37;         // imInvalidPreferences
+inline constexpr csSDK_int32 kMalUnknownError = 99;              // malUnknownError
+inline constexpr csSDK_int32 kMalSupports7 = 100;                // malSupports7
+inline constexpr csSDK_int32 kMalSupports8 = 101;                // malSupports8 (0x65)
+inline constexpr csSDK_int32 kMalSupportsPerInstancePrefs = 102; // malSupportsPerInstancePrefs
+inline constexpr csSDK_int32 kImDelegate = 255;                  // imDelegate
+inline constexpr csSDK_int32 kImCancel = 300;                    // imCancel
+inline constexpr csSDK_int32 kImBadFormatIndex = 301;            // imBadFormatIndex (0x12d)
+inline constexpr csSDK_int32 kImIsCacheable = 400;               // imIsCacheable (0x190)
 
 /// @brief Adobe boolean and access-mode constants.
 inline constexpr prBool kPrTrueVal = 1;
@@ -89,6 +124,117 @@ enum class PrAudioChannelLabelId : uint32_t {
     DiscreteBase = 100
 };
 
+// ============================================================================
+// Binary-Exact Real Adobe Premiere Pro x64 Host ABI Layouts (#pragma pack(4))
+// ============================================================================
+#pragma pack(push, 4)
+
+struct PrHostPlugSuites {
+    std::uint8_t reserved0[0x38]{};
+    SPBasicSuite* (*getSPBasicSuite)() = nullptr; // +0x38
+};
+
+struct PrHostPiSuites {
+    std::uint32_t reserved0 = 0;
+    void* utilFuncs = nullptr;            // +0x04
+    std::uint8_t reserved1[0x10]{};
+    PrHostPlugSuites* plugSuites = nullptr; // +0x1C
+};
+
+struct PrRawStdParms {
+    csSDK_int32 imInterfaceVer = 0;       // +0x00
+    std::uint8_t reserved0[8]{};          // +0x04
+    PrHostPiSuites* piSuites = nullptr;   // +0x0C
+};
+
+struct PrRawImportInfoRec {
+    std::uint8_t reserved0[0x08]{};
+    csSDK_int64 privatedata = 0;          // +0x08
+    std::uint8_t reserved1[0x14]{};
+    csSDK_int32 canOpen = 0;              // +0x24
+    csSDK_int32 canGetPrefs8 = 0;         // +0x28
+    csSDK_int64 setupOnDblClk = 0;        // +0x2C
+    csSDK_int32 hasSetup = 0;             // +0x34
+    std::uint8_t reserved2[0x08]{};
+    csSDK_int64 noFile = 0;               // +0x40
+    csSDK_int32 avoidAudioConform = 0;    // +0x48
+};
+static_assert(offsetof(PrRawImportInfoRec, canOpen) == 0x24, "canOpen offset must be 0x24");
+static_assert(offsetof(PrRawImportInfoRec, canGetPrefs8) == 0x28, "canGetPrefs8 offset must be 0x28");
+static_assert(offsetof(PrRawImportInfoRec, hasSetup) == 0x34, "hasSetup offset must be 0x34");
+
+struct PrRawIndFormatRec {
+    csSDK_uint32 filetype = 0;            // +0x00
+    csSDK_int32 flags = 0;                // +0x04 (0x10 = xfCanOpen | xfIsMovie)
+    csSDK_int32 canAutoOpen = 0;          // +0x08
+    char formatName[256]{};               // +0x0C
+    char formatShortName[32]{};           // +0x10C
+    char platformExtension[464]{};        // +0x12C (total size = 0x2FC = 764 bytes)
+};
+static_assert(sizeof(PrRawIndFormatRec) == 0x2FC, "PrRawIndFormatRec size must be 0x2FC");
+static_assert(offsetof(PrRawIndFormatRec, formatName) == 0x0C, "formatName offset must be 0x0C");
+static_assert(offsetof(PrRawIndFormatRec, platformExtension) == 0x12C, "platformExtension offset must be 0x12C");
+
+struct PrRawGetPrefsRec {
+    void* prefs = nullptr;                // +0x00
+    csSDK_int32 prefsLength = 0;          // +0x08
+    char firstTime = 0;                   // +0x0C
+    char pad[3]{};
+};
+static_assert(offsetof(PrRawGetPrefsRec, prefsLength) == 0x08, "prefsLength offset must be 0x08");
+static_assert(offsetof(PrRawGetPrefsRec, firstTime) == 0x0C, "firstTime offset must be 0x0C");
+
+struct PrRawOpenFileRefRec8 {
+    std::uint8_t reserved0[0x0C]{};
+    const char16_t* filepathPtr = nullptr; // +0x0C
+    std::uint8_t reserved1[0x10]{};
+    void* privatedata = nullptr;          // +0x24
+    std::uint8_t reserved2[0x14]{};
+    csSDK_int32 inReadWrite = 0;          // +0x40
+};
+static_assert(offsetof(PrRawOpenFileRefRec8, privatedata) == 0x24, "privatedata offset must be 0x24");
+
+struct PrRawFrameFormat {
+    csSDK_int32 inWidth = 0;              // +0x00
+    csSDK_int32 inHeight = 0;             // +0x04
+    csSDK_uint32 inPixelFormat = 0;       // +0x08
+};
+
+struct PrRawSourceVideoRec {
+    std::uint8_t reserved0[0x0C]{};
+    PrTime inFrameTime = 0;               // +0x0C
+    PrRawFrameFormat* inFrameFormats = nullptr; // +0x14
+    std::uint8_t reserved1[0x08]{};
+    PPixHand* outFrame = nullptr;         // +0x24
+    void* prefs = nullptr;                // +0x2C
+    void* privatedata = nullptr;          // +0x34
+    std::uint8_t reserved2[0x10]{};
+    csSDK_int32 inQuality = 0;            // +0x4C
+};
+static_assert(offsetof(PrRawSourceVideoRec, inFrameTime) == 0x0C, "inFrameTime offset must be 0x0C");
+static_assert(offsetof(PrRawSourceVideoRec, inFrameFormats) == 0x14, "inFrameFormats offset must be 0x14");
+static_assert(offsetof(PrRawSourceVideoRec, outFrame) == 0x24, "outFrame offset must be 0x24");
+
+struct PrRawPreferredFrameSizeRec {
+    std::uint8_t reserved0[0x08]{};
+    csSDK_int32 inWidth = 0;              // +0x08
+    csSDK_int32 inHeight = 0;             // +0x0C
+    csSDK_uint32 inPixelFormat = 0;       // +0x10
+    csSDK_int32 inIndex = 0;              // +0x14
+    std::uint8_t reserved1[0x0C]{};
+    csSDK_int32 outWidth = 0;             // +0x24
+    csSDK_int32 outHeight = 0;            // +0x28
+    std::uint8_t reserved2[0x0C]{};
+    csSDK_int32 outSupportsScaling = 0;   // +0x38
+};
+static_assert(offsetof(PrRawPreferredFrameSizeRec, outWidth) == 0x24, "outWidth offset must be 0x24");
+
+#pragma pack(pop)
+
+// ============================================================================
+// High-Level C++ Bridge Structures Used Across Module 2 Units & Tests
+// ============================================================================
+
 /// @brief Extended imImportInfoRec structure populated during imInit.
 struct ImImportInfoRecExt {
     prBool canOpen = 0;
@@ -100,6 +246,7 @@ struct ImImportInfoRecExt {
     prBool avoidAudioConform = 0;
     prBool canProvidePeakAudio = 0;
     csSDK_int32 priority = 0;
+    prBool canGetPrefs8 = 1;
 };
 
 /// @brief Extended imFileAccessRec8 structure carrying UTF-16 filepath.

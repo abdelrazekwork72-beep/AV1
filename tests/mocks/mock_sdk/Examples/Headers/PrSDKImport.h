@@ -1,5 +1,5 @@
 #pragma once
-// Clean-room minimal C++17 mock header for CI/testing - zero proprietary Adobe SDK code.
+// Clean-room C++17 Adobe Premiere Pro MediaCore Importer ABI header.
 #include "PrSDKPixelFormat.h"
 #include "PrSDKTypes.h"
 
@@ -8,34 +8,75 @@ using imFileRef = void*;
 enum imSelector : csSDK_int32 {
     imInit = 0,
     imShutdown = 1,
-    imGetInfo8 = 2,
-    imOpenFile8 = 3,
-    imCloseFile = 4,
-    imGetIndFormat = 5,
-    imGetSourceVideo = 6,
-    imGetAudio = 7,
-    imGetIndPixelFormat = 8,
-    imImportAudio7 = 9,
-    imGetPeakAudio = 10,
-    imGetAudioChannelLayout = 11,
-    imCreateAsyncImporter = 12,
-    imQuietFile = 13,
-    imGetPrefs8 = 14,
-    imGetPrefs = 14
+    imImportImage = 5,
+    imQuietFile = 8,
+    imCloseFile = 9,
+    imAnalysis = 12,
+    imDataRateAnalysis = 13,
+    imGetIndFormat = 14,
+    imGetMetaData = 23,
+    imSetMetaData = 24,
+    imImportAudio7 = 25,
+    imGetIndPixelFormat = 27,
+    imGetSupports7 = 28,
+    imResetSequentialAudio = 29,
+    imGetSequentialAudio = 30,
+    imGetSupports8 = 36,
+    imGetInfo8 = 37,
+    imGetPrefs8 = 38,
+    imGetPrefs = 38,
+    imOpenFile8 = 39,
+    imGetPreferredFrameSize = 45,
+    imCreateAsyncImporter = 46,
+    imGetSourceVideo = 47,
+    imGetPeakAudio = 49,
+    imGetTimeInfo8 = 52,
+    imSetTimeInfo8 = 53,
+    imGetAudioChannelLayout = 64,
+    imSelectClipFrameDescriptor = 65,
+    imGetIndColorSpace = 73,
+    imGetInfo9 = 81
 };
 
 enum imReturnValue : csSDK_int32 {
     malNoError = 0,
-    imUnsupported = -1,
-    imMemErr = -2,
-    imBadFile = 1001,
-    imBadFormatIndex = 1002,
-    imIterateStreams = 1003,
-    imBadStreamIndex = 1004
+    imNoErr = 0,
+    imTooWide = 1,
+    imBadFile = 2,
+    imUnsupported = 3,
+    imMemErr = 4,
+    imOtherErr = 5,
+    imNoContent = 6,
+    imBadRate = 7,
+    imBadCompression = 8,
+    imBadCodec = 9,
+    imNoTimecode = 12,
+    imIterateStreams = 18,
+    imBadStreamIndex = 19,
+    imIterateFrameSizes = 24,
+    imFrameNotFound = 28,
+    imBadHeader = 29,
+    imUnsupportedCompression = 30,
+    imFileOpenFailed = 31,
+    imFileHasNoImportableStreams = 32,
+    imFileReadFailed = 33,
+    imUnsupportedAudioFormat = 34,
+    imDecompressionError = 36,
+    imInvalidPreferences = 37,
+    malUnknownError = 99,
+    malSupports7 = 100,
+    malSupports8 = 101,
+    malSupportsPerInstancePrefs = 102,
+    imDelegate = 255,
+    imCancel = 300,
+    imBadFormatIndex = 301,
+    imIsCacheable = 400
 };
 
 struct imStdParms {
-    csSDK_int32 imInterfaceVer = 1;
+    csSDK_int32 imInterfaceVer = 8;
+    csSDK_int32 reserved0 = 0;
+    csSDK_int32 reserved1 = 0;
     SPBasicSuite* piSuites = nullptr;
 };
 

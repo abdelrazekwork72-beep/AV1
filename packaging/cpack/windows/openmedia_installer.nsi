@@ -1,10 +1,10 @@
-; OpenMedia Premiere Pro & Media Encoder Plugin v3.0.0 — Native Windows x64 NSIS Installer
-; Installs Dual-PRM Importers, Exporter, OpenMediaCore.dll, FFmpeg Runtime DLLs, and Config.toml to MediaCore 7.0
+; OpenMedia Premiere Pro & Media Encoder Plugin v3.0.1 — Native Windows x64 NSIS Installer
+; Installs Dual-PRM Importers, Exporter, OpenMediaCore.dll, OpenMediaDesktop.exe, FFmpeg Runtime DLLs, and Config.toml to MediaCore 7.0
 
 !include "MUI2.nsh"
 !include "x64.nsh"
 
-Name "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.0"
+Name "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.1"
 OutFile "${OUTFILE}"
 InstallDir "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore"
 RequestExecutionLevel admin
@@ -49,20 +49,24 @@ Section "OpenMedia MediaCore 7.0 Plugins" SecMain
   File "${STAGE_DIR}\OpenMedia_ImporterHP.prm"
   File "${STAGE_DIR}\OpenMedia_Exporter.prm"
   File "${STAGE_DIR}\OpenMediaCore.dll"
+  File "${STAGE_DIR}\OpenMediaDesktop.exe"
   File /nonfatal "${STAGE_DIR}\av*.dll"
   File /nonfatal "${STAGE_DIR}\sw*.dll"
   File "${STAGE_DIR}\Config.toml"
   File "${STAGE_DIR}\THIRD_PARTY_LICENSES.md"
   File "${STAGE_DIR}\README.md"
 
+  CreateDirectory "$SMPROGRAMS\OpenMedia Control Center"
+  CreateShortCut "$SMPROGRAMS\OpenMedia Control Center\OpenMedia Control Center.lnk" "$INSTDIR\OpenMediaDesktop.exe"
+  CreateShortCut "$DESKTOP\OpenMedia Control Center.lnk" "$INSTDIR\OpenMediaDesktop.exe"
   WriteUninstaller "$INSTDIR\Uninstall-OpenMedia.exe"
 
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.0 (x64)"
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.1 (x64)"
   WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" "$\"$INSTDIR\Uninstall-OpenMedia.exe$\""
   WriteRegStr HKLM "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\Uninstall-OpenMedia.exe$\" /S"
   WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "OpenMedia Project"
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "3.0.0"
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "3.0.1"
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
 SectionEnd
@@ -77,6 +81,10 @@ Section "Uninstall"
   Delete "$INSTDIR\OpenMedia_ImporterHP.prm"
   Delete "$INSTDIR\OpenMedia_Exporter.prm"
   Delete "$INSTDIR\OpenMediaCore.dll"
+  Delete "$INSTDIR\OpenMediaDesktop.exe"
+  Delete "$DESKTOP\OpenMedia Control Center.lnk"
+  Delete "$SMPROGRAMS\OpenMedia Control Center\OpenMedia Control Center.lnk"
+  RMDir "$SMPROGRAMS\OpenMedia Control Center"
   Delete "$INSTDIR\av*.dll"
   Delete "$INSTDIR\sw*.dll"
   Delete "$INSTDIR\Config.toml"

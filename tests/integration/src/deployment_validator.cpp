@@ -1,5 +1,5 @@
 /// @file deployment_validator.cpp
-/// @brief Implementation of DeploymentValidator for Dual-PRM MediaCore plugin verification.
+/// @brief Implementation of DeploymentValidator for Dual-PRM MediaCore plugin verification (v3.0.1 ABI).
 
 #include "deployment_validator.hpp"
 
@@ -68,10 +68,10 @@ private:
 };
 
 ImporterVariantResult evaluateImporterVariant(
-    ImportEntryFn importFn,
-    MockPremiereHost& host,
-    ImporterPriorityTier tier,
-    const std::string& piplName) {
+        ImportEntryFn importFn,
+        MockPremiereHost& host,
+        ImporterPriorityTier tier,
+        const std::string& piplName) {
     ImporterVariantResult variant{};
     variant.loaded = (importFn != nullptr);
     variant.priorityTier = tier;
@@ -81,15 +81,15 @@ ImporterVariantResult evaluateImporterVariant(
         return variant;
     }
     variant.handshakeOk = DeploymentValidator::verifyImporterHandshake(
-        importFn, host, variant.priority, variant.avoidAudioConform);
+            importFn, host, variant.priority, variant.avoidAudioConform);
     return variant;
 }
 
 } // namespace
 
 bool DeploymentValidator::verifyPiplName(
-    ImporterPriorityTier tier,
-    const std::string& piplName) noexcept {
+        ImporterPriorityTier tier,
+        const std::string& piplName) noexcept {
     if (tier == ImporterPriorityTier::Normal) {
         return piplName == kNormalImporterPiplName;
     }
@@ -97,8 +97,8 @@ bool DeploymentValidator::verifyPiplName(
 }
 
 DeploymentValidationResult DeploymentValidator::validatePluginBinaries(
-    const std::string& importerPath,
-    const std::string& exporterPath) const {
+        const std::string& importerPath,
+        const std::string& exporterPath) const {
     DeploymentValidationResult result{};
     ScopedLibrary importerLib(importerPath);
     ScopedLibrary exporterLib(exporterPath);
@@ -117,9 +117,9 @@ DeploymentValidationResult DeploymentValidator::validatePluginBinaries(
 }
 
 DeploymentValidationResult DeploymentValidator::validateDualPluginBinaries(
-    const std::string& normalImporterPath,
-    const std::string& hpImporterPath,
-    const std::string& exporterPath) const {
+        const std::string& normalImporterPath,
+        const std::string& hpImporterPath,
+        const std::string& exporterPath) const {
     DeploymentValidationResult result{};
     result.dualPrmMode = true;
 
@@ -144,8 +144,8 @@ DeploymentValidationResult DeploymentValidator::validateDualPluginBinaries(
 }
 
 DeploymentValidationResult DeploymentValidator::validateDirectEntryPoints(
-    ImportEntryFn importFn,
-    ExportEntryFn exportFn) const {
+        ImportEntryFn importFn,
+        ExportEntryFn exportFn) const {
     DeploymentValidationResult result{};
     if (!importFn || !exportFn) {
         result.errorMessage = "Null entry point function pointer supplied.";
@@ -156,18 +156,18 @@ DeploymentValidationResult DeploymentValidator::validateDirectEntryPoints(
     result.exporterLoaded = true;
     MockPremiereHost host;
     result.importerHandshakeOk = verifyImporterHandshake(
-        importFn, host, result.importerPriority, result.avoidAudioConform);
+            importFn, host, result.importerPriority, result.avoidAudioConform);
     result.exporterHandshakeOk = verifyExporterHandshake(
-        exportFn, host, result.exporterContainerCount);
+            exportFn, host, result.exporterContainerCount);
     return result;
 }
 
 DeploymentValidationResult DeploymentValidator::validateDualDirectEntryPoints(
-    ImportEntryFn normalImportFn,
-    ImportEntryFn hpImportFn,
-    ExportEntryFn exportFn,
-    const std::string& normalPiplName,
-    const std::string& hpPiplName) const {
+        ImportEntryFn normalImportFn,
+        ImportEntryFn hpImportFn,
+        ExportEntryFn exportFn,
+        const std::string& normalPiplName,
+        const std::string& hpPiplName) const {
     DeploymentValidationResult result{};
     result.dualPrmMode = true;
     if (!normalImportFn || !hpImportFn || !exportFn) {
@@ -177,9 +177,9 @@ DeploymentValidationResult DeploymentValidator::validateDualDirectEntryPoints(
 
     MockPremiereHost host;
     result.normalImporter = evaluateImporterVariant(
-        normalImportFn, host, ImporterPriorityTier::Normal, normalPiplName);
+            normalImportFn, host, ImporterPriorityTier::Normal, normalPiplName);
     result.hpImporter = evaluateImporterVariant(
-        hpImportFn, host, ImporterPriorityTier::High, hpPiplName);
+            hpImportFn, host, ImporterPriorityTier::High, hpPiplName);
 
     result.importerLoaded = result.normalImporter.loaded && result.hpImporter.loaded;
     result.importerHandshakeOk = result.normalImporter.handshakeOk && result.hpImporter.handshakeOk;
@@ -188,18 +188,28 @@ DeploymentValidationResult DeploymentValidator::validateDualDirectEntryPoints(
 
     result.exporterLoaded = true;
     result.exporterHandshakeOk = verifyExporterHandshake(
-        exportFn, host, result.exporterContainerCount);
+            exportFn, host, result.exporterContainerCount);
     return result;
 }
 
 bool DeploymentValidator::verifyImporterHandshake(
-    ImportEntryFn importFn,
-    MockPremiereHost& host,
-    csSDK_int32& outPriority,
-    bool& outAvoidConform) {
+        ImportEntryFn importFn,
+        MockPremiereHost& host,
+        csSDK_int32& outPriority,
+        bool& outAvoidConform) {
     if (!importFn) {
         return false;
     }
+    // Verify official imGetSupports8 (36 -> 101) and imGetSupports7 (28 -> 100)
+    if (importFn(openmedia::importer::kSelGetSupports8, &host.importerStdParms, nullptr, nullptr) !=
+        openmedia::importer::kMalSupports8) {
+        return false;
+    }
+    if (importFn(openmedia::importer::kSelGetSupports7, &host.importerStdParms, nullptr, nullptr) !=
+        openmedia::importer::kMalSupports7) {
+        return false;
+    }
+
     openmedia::importer::ImImportInfoRecExt initRec{};
     if (importFn(openmedia::importer::kSelInit, &host.importerStdParms, &initRec, nullptr) != openmedia::importer::kImNoErr) {
         return false;
@@ -207,17 +217,26 @@ bool DeploymentValidator::verifyImporterHandshake(
     outPriority = initRec.priority;
     outAvoidConform = (initRec.avoidAudioConform != 0);
 
-    for (std::intptr_t idx = 0; idx < 7; ++idx) {
+    for (std::intptr_t idx = 0; idx < 39; ++idx) {
         openmedia::importer::ImIndFormatRecExt fmtRec{};
         const csSDK_int32 rc = importFn(
-            openmedia::importer::kSelGetIndFormat,
-            &host.importerStdParms,
-            reinterpret_cast<void*>(idx),
-            &fmtRec);
+                openmedia::importer::kSelGetIndFormat,
+                &host.importerStdParms,
+                reinterpret_cast<void*>(idx),
+                &fmtRec);
         if (rc != openmedia::importer::kImNoErr) {
             return false;
         }
     }
+    // Verify OOB returns official imBadFormatIndex (301)
+    openmedia::importer::ImIndFormatRecExt oobRec{};
+    if (importFn(openmedia::importer::kSelGetIndFormat,
+                 &host.importerStdParms,
+                 reinterpret_cast<void*>(static_cast<std::intptr_t>(39)),
+                 &oobRec) != openmedia::importer::kImBadFormatIndex) {
+        return false;
+    }
+
     if (importFn(openmedia::importer::kSelQuietFile, &host.importerStdParms, nullptr, nullptr) != openmedia::importer::kImNoErr) {
         return false;
     }
@@ -225,9 +244,9 @@ bool DeploymentValidator::verifyImporterHandshake(
 }
 
 bool DeploymentValidator::verifyExporterHandshake(
-    ExportEntryFn exportFn,
-    MockPremiereHost& host,
-    int& outContainerCount) {
+        ExportEntryFn exportFn,
+        MockPremiereHost& host,
+        int& outContainerCount) {
     if (!exportFn) {
         return false;
     }

@@ -1,57 +1,50 @@
-// OpenMedia Premiere Pro & Media Encoder Exporter Windows Resource Script
-// Defines EXPT and PiPL binary resource tables and version metadata.
+// OpenMedia Premiere Pro & Media Encoder Exporter Windows Resource Script (v3.0.1)
+// Binary-exact Adobe MediaCore 7.0 EXPT (1000) & PiPL (16000) resources.
 
 #include <winresrc.h>
 
-#define OPENMEDIA_EXPORTER_FOURCC      0x4F4D4D4B
-#define OPENMEDIA_EXPORTER_NAME        "OpenMedia Exporter"
-#define OPENMEDIA_EXPORTER_ENTRY       "xSDKExport"
-#define OPENMEDIA_EXPORTER_VERSION_STR "2.0.0.0"
-
-1001 RCDATA
-BEGIN
-    "OpenMedia_Exporter\0",
-    "xSDKExport\0",
-    "2.0.0.0\0"
-END
+#define OPENMEDIA_EXPORTER_FOURCC       0x4F4D4D4B
+#define OPENMEDIA_EXPORTER_NAME         "OpenMedia Exporter"
+#define OPENMEDIA_EXPORTER_ENTRY        "xSDKExport"
+#define OPENMEDIA_EXPORTER_VERSION_STR  "3.0.1.0"
 
 1000 EXPT DISCARDABLE
 BEGIN
-    0x0001,
-    OPENMEDIA_EXPORTER_FOURCC,
-    "OpenMedia Exporter\0",
-    "2.0.0.0\0",
-    "xSDKExport\0"
+    0x0000,
+    0x5845
 END
 
 16000 PiPL DISCARDABLE
 BEGIN
     0x0001,
     0x00000000L,
-    0x00000006L,
+    0x00000003L,
 
-    "8BIM", "kind", 0L, 4L,
-    "EXPT",
+    // Property 1: '8BIM' 'kind' = 'EXPT'
+    0x3842494DL,
+    0x6B696E64L,
+    0x00000000L,
+    0x00000004L,
+    0x45585054L,
 
-    "8BIM", "name", 0L, 20L,
-    "OpenMedia Exporter\0\0",
+    // Property 2: '8BIM' 'name' = "\022OpenMedia Exporter" (18 chars + 1 len + 1 pad = 20L)
+    0x3842494DL,
+    0x6E616D65L,
+    0x00000000L,
+    0x00000014L,
+    "\022OpenMedia Exporter\0",
 
-    "8BIM", "vers", 0L, 4L,
-    0x00020000L,
-
-    "8BIM", "wx86", 0L, 12L,
-    "xSDKExport\0\0",
-
-    "8BIM", "fccc", 0L, 4L,
-    OPENMEDIA_EXPORTER_FOURCC,
-
-    "8BIM", "exmn", 0L, 20L,
-    "OpenMedia Exporter\0\0"
+    // Property 3: '8BIM' 'eMNA' = "\011OpenMedia" (9 chars + 1 len + 2 pad = 12L)
+    0x3842494DL,
+    0x654D4E41L,
+    0x00000000L,
+    0x0000000CL,
+    "\011OpenMedia\0\0"
 END
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     2,0,0,0
-PRODUCTVERSION  2,0,0,0
+FILEVERSION     3,0,1,0
+PRODUCTVERSION  3,0,1,0
 FILEFLAGSMASK   0x3fL
 FILEFLAGS       0x0L
 FILEOS          0x40004L
@@ -63,12 +56,12 @@ BEGIN
         BLOCK "040904b0"
         BEGIN
             VALUE "CompanyName",      "OpenMedia\0"
-            VALUE "FileDescription",  "OpenMedia AV1/VP9/MKV/WebM Exporter\0"
-            VALUE "FileVersion",      "2.0.0.0\0"
+            VALUE "FileDescription",  "OpenMedia AV1/VP9/MKV/WebM Exporter (xSDKExport)\0"
+            VALUE "FileVersion",      "3.0.1 (2.0.0.0)\0"
             VALUE "InternalName",     "OpenMedia_Exporter\0"
             VALUE "OriginalFilename", "OpenMedia_Exporter.prm\0"
             VALUE "ProductName",      "OpenMedia Exporter\0"
-            VALUE "ProductVersion",   "2.0.0.0\0"
+            VALUE "ProductVersion",   "3.0.1.0\0"
         END
     END
     BLOCK "VarFileInfo"

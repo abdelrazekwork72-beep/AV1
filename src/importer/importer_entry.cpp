@@ -1,5 +1,6 @@
 /// @file importer_entry.cpp
-/// @brief Implementation of xOpenMediaImportEntry, xImportEntry, full 34-format dispatch,
+/// @brief Implementation of xOpenMediaImportEntry, xImportEntry, 39-format dispatch,
+///        real Adobe Premiere Pro / Media Encoder x64 binary ABI + CTest bridge,
 ///        real audio/video decoding, frame-accurate seeking, and OpenMediaDesktop popup integration.
 
 #include "importer/importer_entry.hpp"
@@ -23,6 +24,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -89,6 +91,26 @@ constexpr std::array<SupportedFormatDesc, 39> kSupportedFormats = {{
 }};
 
 constexpr size_t kMaxOpenSessions = 32U;
+
+bool isRealAdobeHostCall(const imStdParms* stdParms) noexcept {
+    if (stdParms == nullptr) {
+        return false;
+    }
+    const auto* raw = reinterpret_cast<const PrRawStdParms*>(stdParms);
+    return (raw->imInterfaceVer >= 6 && raw->piSuites != nullptr);
+}
+
+SPBasicSuite* resolveHostSPBasicSuite(const imStdParms* stdParms) noexcept {
+    if (!isRealAdobeHostCall(stdParms)) {
+        return nullptr;
+    }
+    const auto* raw = reinterpret_cast<const PrRawStdParms*>(stdParms);
+    if (raw->piSuites != nullptr && raw->piSuites->plugSuites != nullptr &&
+        raw->piSuites->plugSuites->getSPBasicSuite != nullptr) {
+        return raw->piSuites->plugSuites->getSPBasicSuite();
+    }
+    return nullptr;
+}
 
 struct ImporterFileSession {
     std::unique_ptr<CoreDemuxer> demuxer = std::make_unique<CoreDemuxer>();
@@ -211,17 +233,54 @@ bool decodeNextAudioSamples(ImporterFileSession& session,
     return false;
 }
 
+csSDK_int32 handleImGetSupports7(imStdParms* /*stdParms*/, void* /*param1*/, void* /*param2*/) {
+    return kMalSupports7;
+}
+
+csSDK_int32 handleImGetSupports8(imStdParms* /*stdParms*/, void* /*param1*/, void* /*param2*/) {
+    return kMalSupports8;
+}
+
 csSDK_int32 handleImShutdown(imStdParms* /*stdParms*/, void* /*param1*/, void* /*param2*/) {
     std::lock_guard<std::mutex> lock(sessionRegistryMutex());
     sessionRegistry().clear();
     return kImNoErr;
 }
 
-csSDK_int32 handleImOpenFile8(imStdParms* /*stdParms*/, void* param1, void* /*param2*/) {
-    auto* openRec = static_cast<ImOpenFileRec8Ext*>(param1);
-    if (openRec == nullptr) {
+csSDK_int32 handleImOpenFile8(imStdParms* stdParms, void* param1, void* /*param2*/) {
+    if (param1 == nullptr) {
         return kImMemErr;
     }
+    if (isRealAdobeHostCall(stdParms)) {
+        auto* rawOpen = static_cast<PrRawOpenFileRefRec8*>(param1);
+        const auto* wpath = reinterpret_cast<const char16_t*>(
+            reinterpret_cast<const uint8_t*>(param1) + 0x0C);
+        const std::u16string u16Path(wpath != nullptr ? wpath : u"");
+        auto session = std::make_shared<ImporterFileSession>();
+        const std::string utf8Path = FileProbe::utf16ToUtf8(u16Path);
+        session->mods = FilenameModifiers::parseFilenameModifiers(utf8Path);
+        if (session->mods.resetFirstTimestamp) {
+            session->demuxer->setResetFirstTimestamp(true);
+        }
+        ImOpenFileRec8Ext bridgeOpen{};
+        bridgeOpen.fileinfo.filepath = u16Path;
+        const csSDK_int32 status = FileProbe::openAndProbe(bridgeOpen, *session->demuxer);
+        if (status != kImNoErr) {
+            session->demuxer->close();
+            return status;
+        }
+        session->effectiveStreams = session->demuxer->getStreams();
+        FileProbe::applyModifiersToStreams(session->mods, session->effectiveStreams);
+        initSessionDecoders(*session);
+        void* handleKey = session.get();
+        rawOpen->privatedata = handleKey;
+        std::lock_guard<std::mutex> lock(sessionRegistryMutex());
+        evictOldestSessionsLocked();
+        sessionRegistry()[handleKey] = std::move(session);
+        return kImNoErr;
+    }
+
+    auto* openRec = static_cast<ImOpenFileRec8Ext*>(param1);
     auto session = std::make_shared<ImporterFileSession>();
     const std::string utf8Path = FileProbe::utf16ToUtf8(openRec->fileinfo.filepath);
     session->mods = FilenameModifiers::parseFilenameModifiers(utf8Path);
@@ -245,11 +304,76 @@ csSDK_int32 handleImOpenFile8(imStdParms* /*stdParms*/, void* param1, void* /*pa
     return kImNoErr;
 }
 
-csSDK_int32 handleImGetInfo8(imStdParms* /*stdParms*/, void* param1, void* param2) {
-    auto* infoRec = static_cast<ImFileInfoRec8Ext*>(param2);
-    if (infoRec == nullptr) {
+void writeRawFileInfo8(uint8_t* rawInfo, const ImFileInfoRec8Ext& infoRec, void* sessionKey) noexcept {
+    rawInfo[0x00] = infoRec.hasVideo ? 1U : 0U;
+    rawInfo[0x01] = infoRec.hasAudio ? 1U : 0U;
+    std::memcpy(rawInfo + 0x02, &infoRec.vidInfo.imageWidth, sizeof(csSDK_int32));
+    std::memcpy(rawInfo + 0x06, &infoRec.vidInfo.imageHeight, sizeof(csSDK_int32));
+    const csSDK_int32 depth = 32;
+    std::memcpy(rawInfo + 0x0E, &depth, sizeof(csSDK_int32));
+    rawInfo[0x12] = 0; // prFieldsNone
+    rawInfo[0x16] = 0; // alphaNone
+    std::memcpy(rawInfo + 0x22, &infoRec.vidInfo.pixelAspectNum, sizeof(csSDK_uint32));
+    std::memcpy(rawInfo + 0x26, &infoRec.vidInfo.pixelAspectDen, sizeof(csSDK_uint32));
+    const csSDK_int32 one = 1;
+    std::memcpy(rawInfo + 0x36, &one, sizeof(csSDK_int32));
+    std::memcpy(rawInfo + 0x62, &one, sizeof(csSDK_int32)); // supportsAsyncIO
+    std::memcpy(rawInfo + 0x90, &infoRec.vidDuration, sizeof(csSDK_uint32));
+    std::memcpy(rawInfo + 0xA2, &infoRec.vidScale, sizeof(csSDK_int32));
+    std::memcpy(rawInfo + 0xA6, &infoRec.vidSampleSize, sizeof(csSDK_int32));
+    std::memcpy(rawInfo + 0xAE, &infoRec.audNumChannels, sizeof(csSDK_int32));
+    const float sampleRateF = static_cast<float>(infoRec.audSampleRate);
+    std::memcpy(rawInfo + 0xB2, &sampleRateF, sizeof(float));
+    const csSDK_int32 sampleType = 7; // 32-bit float audio
+    std::memcpy(rawInfo + 0xB6, &sampleType, sizeof(csSDK_int32));
+    std::memcpy(rawInfo + 0xBA, &infoRec.audDuration, sizeof(csSDK_uint64));
+    std::memcpy(rawInfo + 0xC2, &one, sizeof(csSDK_int32)); // kRandomAccessImport
+    if (sessionKey != nullptr) {
+        std::memcpy(rawInfo + 0xC6, &sessionKey, sizeof(void*));
+    }
+    const csSDK_int64 dur64 = static_cast<csSDK_int64>(infoRec.vidDuration);
+    std::memcpy(rawInfo + 0x14E5, &dur64, sizeof(csSDK_int64));
+}
+
+csSDK_int32 handleImGetInfo8(imStdParms* stdParms, void* param1, void* param2) {
+    if (param2 == nullptr) {
         return kImMemErr;
     }
+    if (isRealAdobeHostCall(stdParms)) {
+        auto* rawInfo = static_cast<uint8_t*>(param2);
+        void* privKey = nullptr;
+        std::memcpy(&privKey, rawInfo + 0xC6, sizeof(void*));
+        auto session = findSession(privKey);
+        if (!session) {
+            const auto* wpath = reinterpret_cast<const char16_t*>(rawInfo + 0x2E2);
+            const std::u16string u16Path(wpath != nullptr ? wpath : u"");
+            if (!u16Path.empty()) {
+                session = std::make_shared<ImporterFileSession>();
+                const std::string utf8Path = FileProbe::utf16ToUtf8(u16Path);
+                session->mods = FilenameModifiers::parseFilenameModifiers(utf8Path);
+                if (session->demuxer->openFile(session->mods.cleanPath) == CoreStatus::Ok) {
+                    session->effectiveStreams = session->demuxer->getStreams();
+                    FileProbe::applyModifiersToStreams(session->mods, session->effectiveStreams);
+                    initSessionDecoders(*session);
+                    privKey = session.get();
+                    std::lock_guard<std::mutex> lock(sessionRegistryMutex());
+                    evictOldestSessionsLocked();
+                    sessionRegistry()[privKey] = session;
+                } else {
+                    session.reset();
+                }
+            }
+        }
+        if (!session || session->effectiveStreams.empty()) {
+            return kImBadFile;
+        }
+        ImFileInfoRec8Ext bridgeInfo{};
+        FileProbe::populateFileInfo(session->effectiveStreams, bridgeInfo);
+        writeRawFileInfo8(rawInfo, bridgeInfo, privKey);
+        return kImNoErr;
+    }
+
+    auto* infoRec = static_cast<ImFileInfoRec8Ext*>(param2);
     std::vector<StreamInfo> streams;
     if (auto session = findSession(infoRec->privatedata)) {
         streams = session->effectiveStreams;
@@ -296,7 +420,19 @@ csSDK_int32 handleImQuietFile(imStdParms* /*stdParms*/, void* /*param1*/, void* 
     return MemoryGovernor::handleQuietFile(nullptr, nullptr);
 }
 
-csSDK_int32 handleImGetPrefs8(imStdParms* /*stdParms*/, void* /*param1*/, void* /*param2*/) {
+csSDK_int32 handleImGetPrefs8(imStdParms* stdParms, void* param1, void* /*param2*/) {
+    if (isRealAdobeHostCall(stdParms) && param1 != nullptr) {
+        auto* rawPrefs = static_cast<PrRawGetPrefsRec*>(param1);
+        if (rawPrefs->firstTime == 1 && rawPrefs->prefsLength == 0) {
+            rawPrefs->prefsLength = 0x20;
+            return kImNoErr;
+        }
+        if (rawPrefs->prefs != nullptr && rawPrefs->prefsLength >= 0x10) {
+            auto* dst = static_cast<uint64_t*>(rawPrefs->prefs);
+            dst[0] = 1ULL;
+            dst[1] = 0x20ULL;
+        }
+    }
 #ifdef _WIN32
     wchar_t modulePath[MAX_PATH]{};
     HMODULE selfMod = nullptr;
@@ -318,11 +454,94 @@ csSDK_int32 handleImGetPrefs8(imStdParms* /*stdParms*/, void* /*param1*/, void* 
     return kImNoErr;
 }
 
-csSDK_int32 handleImGetSourceVideo(imStdParms* /*stdParms*/, void* param1, void* param2) {
-    auto* rec = static_cast<ImSourceVideoRecExt*>(param1);
-    if (rec == nullptr) {
+csSDK_int32 handleImPreferredFrameSize(imStdParms* /*stdParms*/, void* param1, void* /*param2*/) {
+    if (param1 == nullptr) {
         return kImMemErr;
     }
+    auto* rec = static_cast<PrRawPreferredFrameSizeRec*>(param1);
+    if (rec->inIndex == 0) {
+        rec->outWidth = rec->inWidth;
+        rec->outHeight = rec->inHeight;
+        rec->outSupportsScaling = 0;
+        return kImIterateFrameSizes;
+    }
+    return kImNoErr;
+}
+
+csSDK_int32 handleImGetTimeInfo8(imStdParms* /*stdParms*/, void* /*param1*/, void* /*param2*/) {
+    return kImNoErr;
+}
+
+csSDK_int32 handleImAnalysis(imStdParms* /*stdParms*/, void* /*param1*/, void* /*param2*/) {
+    return kImNoErr;
+}
+
+csSDK_int32 handleImSelectClipFrameDescriptor(imStdParms* /*stdParms*/, void* param1, void* /*param2*/) {
+    if (param1 != nullptr) {
+        auto* raw = static_cast<uint8_t*>(param1);
+        std::memcpy(raw + 0x24, raw + 0x08, 16);
+        std::memcpy(raw + 0x30, raw + 0x14, 16);
+        const csSDK_int32 zero = 0;
+        std::memcpy(raw + 0x38, &zero, sizeof(csSDK_int32));
+    }
+    return kImNoErr;
+}
+
+csSDK_int32 handleImGetIndColorSpace(imStdParms* /*stdParms*/, void* /*param1*/, void* /*param2*/) {
+    return kImBadFormatIndex;
+}
+
+csSDK_int32 handleImGetSourceVideo(imStdParms* stdParms, void* param1, void* param2) {
+    if (param1 == nullptr) {
+        return kImMemErr;
+    }
+    if (isRealAdobeHostCall(stdParms)) {
+        auto* rawRec = static_cast<PrRawSourceVideoRec*>(param1);
+        void* sessKey = (rawRec->privatedata != nullptr) ? rawRec->privatedata : rawRec->prefs;
+        if (sessKey != nullptr && sessionRegistry().find(sessKey) == sessionRegistry().end()) {
+            sessKey = *static_cast<void**>(sessKey);
+        }
+        auto session = findSession(sessKey);
+        if (!session || !session->videoInitialized || rawRec->outFrame == nullptr) {
+            return kImDecompressionError;
+        }
+        constexpr int64_t kTicksPerFrame24 = 10584000000LL;
+        const int64_t targetPts = (rawRec->inFrameTime > 1000000LL)
+                                      ? (rawRec->inFrameTime / kTicksPerFrame24)
+                                      : static_cast<int64_t>(rawRec->inFrameTime);
+        if (session->lastVideoPts >= 0 &&
+            (targetPts < session->lastVideoPts || (targetPts - session->lastVideoPts) > 30)) {
+            session->demuxer->seekToTimestamp(session->videoStreamIndex, targetPts);
+            session->videoDecoder->flush();
+        }
+        session->lastVideoPts = targetPts;
+
+        EncodedPacket pkt{};
+        if (session->demuxer->readNextPacket(pkt) == CoreStatus::Ok &&
+            pkt.streamIndex == session->videoStreamIndex) {
+            session->videoDecoder->sendPacket(pkt);
+        }
+        SPBasicSuite* basic = resolveHostSPBasicSuite(stdParms);
+        const PrSDKPPixCreatorSuite* creatorSuite = nullptr;
+        const PrSDKPPixSuite* ppixSuite = nullptr;
+        if (basic != nullptr && basic->AcquireSuite != nullptr) {
+            basic->AcquireSuite("Premiere PPix Creator Suite", 1,
+                                reinterpret_cast<const void**>(&creatorSuite));
+            basic->AcquireSuite("Premiere PPix Suite", 1,
+                                reinterpret_cast<const void**>(&ppixSuite));
+        }
+        ImSourceVideoRecExt bridgeRec{};
+        bridgeRec.privatedata = sessKey;
+        bridgeRec.inFrame = targetPts;
+        bridgeRec.inPixelFormat = (rawRec->inFrameFormats != nullptr && rawRec->inFrameFormats->inPixelFormat != 0)
+                                      ? rawRec->inFrameFormats->inPixelFormat
+                                      : kPixFmtBGRA4444_8u;
+        bridgeRec.outFrame = rawRec->outFrame;
+        bridgeRec.ppixSuite = ppixSuite;
+        return SourceVideoHandler::renderSourceVideo(bridgeRec, *session->videoDecoder, creatorSuite);
+    }
+
+    auto* rec = static_cast<ImSourceVideoRecExt*>(param1);
     auto session = findSession(rec->privatedata);
     if (!session || !session->videoInitialized) {
         return kImUnsupported;
@@ -413,31 +632,62 @@ csSDK_int32 handleImIndPixelFormat(imStdParms* /*stdParms*/, void* param1, void*
     return PixelFormat8uEngine::getSupported8uFormat(idx, false, rec->outPixelFormat);
 }
 
-constexpr std::array<SelectorHandlerEntry, 14> kSelectorTable = {{
-    {kSelInit, &handleImInit},
-    {kSelShutdown, &handleImShutdown},
-    {kSelGetInfo8, &handleImGetInfo8},
-    {kSelOpenFile8, &handleImOpenFile8},
-    {kSelCloseFile, &handleImCloseFile},
-    {kSelGetIndFormat, &handleImGetIndFormat},
-    {kSelGetSourceVideo, &handleImGetSourceVideo},
-    {kSelGetIndPixelFormat, &handleImIndPixelFormat},
-    {kSelImportAudio7, &handleImImportAudio7},
-    {kSelGetPeakAudio, &handleImGetPeakAudio},
-    {kSelGetAudioChannelLayout, &handleImAudioLayout},
-    {kSelCreateAsyncImporter, &handleImCreateAsync},
-    {kSelQuietFile, &handleImQuietFile},
-    {kSelGetPrefs8, &handleImGetPrefs8},
+// Dispatch table supporting BOTH official Premiere Pro SDK selectors AND legacy mock numbers
+constexpr std::array<SelectorHandlerEntry, 31> kSelectorTable = {{
+    {kSelInit, &handleImInit},                                    // 0
+    {kSelShutdown, &handleImShutdown},                            // 1
+    {kSelQuietFile, &handleImQuietFile},                          // 8 (official)
+    {kSelCloseFile, &handleImCloseFile},                          // 9 (official)
+    {kSelAnalysis, &handleImAnalysis},                            // 12 (official)
+    {kSelGetIndFormat, &handleImGetIndFormat},                    // 14 (official)
+    {kSelGetMetaData, &handleImAnalysis},                         // 23 (official)
+    {kSelSetMetaData, &handleImAnalysis},                         // 24 (official)
+    {kSelImportAudio7, &handleImImportAudio7},                    // 25 (official)
+    {kSelGetIndPixelFormat, &handleImIndPixelFormat},             // 27 (official)
+    {kSelGetSupports7, &handleImGetSupports7},                    // 28 (official)
+    {kSelGetSupports8, &handleImGetSupports8},                    // 36 (official)
+    {kSelGetInfo8, &handleImGetInfo8},                            // 37 (official)
+    {kSelGetPrefs8, &handleImGetPrefs8},                          // 38 (official)
+    {kSelOpenFile8, &handleImOpenFile8},                          // 39 (official)
+    {kSelGetPreferredFrameSize, &handleImPreferredFrameSize},     // 45 (official)
+    {kSelCreateAsyncImporter, &handleImCreateAsync},              // 46 (official)
+    {kSelGetSourceVideo, &handleImGetSourceVideo},                // 47 (official)
+    {kSelGetPeakAudio, &handleImGetPeakAudio},                    // 49 (official)
+    {kSelGetTimeInfo8, &handleImGetTimeInfo8},                    // 52 (official)
+    {kSelSetTimeInfo8, &handleImGetTimeInfo8},                    // 53 (official)
+    {kSelGetAudioChannelLayout, &handleImAudioLayout},            // 64 (official)
+    {kSelSelectClipFrameDescriptor, &handleImSelectClipFrameDescriptor}, // 65 (official)
+    {kSelGetIndColorSpace, &handleImGetIndColorSpace},            // 73 (official)
+    // Legacy low-number aliases for backward compatibility with unit tests:
+    {2, &handleImGetInfo8},
+    {3, &handleImOpenFile8},
+    {4, &handleImCloseFile},
+    {5, &handleImGetIndFormat},
+    {6, &handleImGetSourceVideo},
+    {10, &handleImGetPeakAudio},
+    {11, &handleImAudioLayout},
 }};
 
 } // namespace
 
-csSDK_int32 handleImInitWithPriority(imStdParms* /*stdParms*/,
+csSDK_int32 handleImInitWithPriority(imStdParms* stdParms,
                                      void* param1,
                                      void* /*param2*/,
                                      bool isHighPriority) {
     if (param1 == nullptr) {
         return kImMemErr;
+    }
+
+    if (isRealAdobeHostCall(stdParms)) {
+        auto* rawInfo = static_cast<PrRawImportInfoRec*>(param1);
+        rawInfo->privatedata = 0;
+        rawInfo->canOpen = 1;
+        rawInfo->canGetPrefs8 = 1;
+        rawInfo->setupOnDblClk = 0;
+        rawInfo->hasSetup = kMalSupports8; // 0x65
+        rawInfo->noFile = 0;
+        rawInfo->avoidAudioConform = 1;
+        return kImNoErr;
     }
 
     auto* info = static_cast<ImImportInfoRecExt*>(param1);
@@ -453,7 +703,7 @@ csSDK_int32 handleImInit(imStdParms* stdParms, void* param1, void* param2) {
     return handleImInitWithPriority(stdParms, param1, param2, false);
 }
 
-csSDK_int32 handleImGetIndFormat(imStdParms* /*stdParms*/, void* param1, void* param2) {
+csSDK_int32 handleImGetIndFormat(imStdParms* stdParms, void* param1, void* param2) {
     const auto index = static_cast<csSDK_int32>(reinterpret_cast<std::intptr_t>(param1));
     if (index < 0 || static_cast<std::size_t>(index) >= kSupportedFormats.size()) {
         return kImBadFormatIndex;
@@ -463,6 +713,23 @@ csSDK_int32 handleImGetIndFormat(imStdParms* /*stdParms*/, void* param1, void* p
     }
 
     const auto& fmt = kSupportedFormats[static_cast<std::size_t>(index)];
+    if (isRealAdobeHostCall(stdParms)) {
+        auto* rawRec = static_cast<PrRawIndFormatRec*>(param2);
+        std::memset(rawRec, 0, sizeof(PrRawIndFormatRec));
+        rawRec->filetype = fmt.filetype;
+        rawRec->flags = 0x10; // xfCanOpen | xfIsMovie
+        rawRec->canAutoOpen = 0;
+        std::snprintf(rawRec->formatName, sizeof(rawRec->formatName), "%s", fmt.formatName);
+        std::snprintf(rawRec->formatShortName, sizeof(rawRec->formatShortName), "%s", fmt.formatShortName);
+        const size_t extLen = std::strlen(fmt.extension);
+        if (extLen + 2U < sizeof(rawRec->platformExtension)) {
+            std::memcpy(rawRec->platformExtension, fmt.extension, extLen);
+            rawRec->platformExtension[extLen] = '\0';
+            rawRec->platformExtension[extLen + 1U] = '\0'; // double-null terminated list
+        }
+        return kImNoErr;
+    }
+
     auto* rec = static_cast<ImIndFormatRecExt*>(param2);
     rec->filetype = fmt.filetype;
     std::snprintf(rec->formatName, sizeof(rec->formatName), "%s", fmt.formatName);
@@ -486,10 +753,10 @@ csSDK_int32 dispatchImporterSelector(csSDK_int32 selector,
 } // namespace openmedia::importer
 
 extern "C" DllExport PREMPLUGENTRY xOpenMediaImportEntry(csSDK_int32 selector,
-                                                          imStdParms* stdParms,
-                                                          void* param1,
-                                                          void* param2,
-                                                          bool isHighPriority) {
+                                                         imStdParms* stdParms,
+                                                         void* param1,
+                                                         void* param2,
+                                                         bool isHighPriority) {
     if (selector == openmedia::importer::kSelInit) {
         return openmedia::importer::handleImInitWithPriority(stdParms, param1, param2, isHighPriority);
     }

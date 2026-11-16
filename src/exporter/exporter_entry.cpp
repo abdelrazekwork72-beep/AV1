@@ -4,6 +4,14 @@
 #include "exporter/match_source_engine.hpp"
 #include "exporter/push_render_loop.hpp"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
 namespace openmedia::exporter {
 namespace {
 struct ContainerSpec {
@@ -39,6 +47,27 @@ csSDK_int32 onExport(csSDK_int32, exportStdParms*, void* param1, void*) noexcept
     return PushRenderLoop::runMultiPassWithDrain(1U, 1U, 1920U, 1080U, 0, renderedFrames, drained, trailerWritten);
 }
 csSDK_int32 onQueryOutputFileList(csSDK_int32, exportStdParms*, void*, void*) noexcept {
+    return kExNoErr;
+}
+csSDK_int32 onParamButton(csSDK_int32, exportStdParms*, void*, void*) noexcept {
+#ifdef _WIN32
+    wchar_t modulePath[MAX_PATH]{};
+    HMODULE selfMod = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&onParamButton),
+                           &selfMod) &&
+        GetModuleFileNameW(selfMod, modulePath, MAX_PATH) > 0) {
+        std::wstring dir(modulePath);
+        const size_t slash = dir.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) {
+            const std::wstring exePath = dir.substr(0, slash + 1U) + L"OpenMediaDesktop.exe";
+            if (GetFileAttributesW(exePath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+                ShellExecuteW(nullptr, L"open", exePath.c_str(), L"--popup", nullptr, SW_SHOWNORMAL);
+            }
+        }
+    }
+#endif
     return kExNoErr;
 }
 csSDK_int32 onValidateParamChanged(csSDK_int32, exportStdParms*, void* param1, void*) noexcept {
@@ -84,14 +113,20 @@ csSDK_int32 ExporterEntry::handleQueryStillSequence(prBool* outIsStillSeq) noexc
 csSDK_int32 ExporterEntry::dispatch(csSDK_int32 selector, exportStdParms* stdParms, void* param1, void* param2) noexcept {
     static constexpr ExSelectorEntry kTable[] = {
         {exSelStartup, &onStartup},
-        {exSelShutdown, &onShutdown},
         {exSelBeginInstance, &onBeginInstance},
+        {exSelGenerateDefaultParams, &onGenerateDefaultParams},
+        {exSelPostProcessParams, &onQueryOutputFileList},
+        {exSelGetParamSummary, &onQueryOutputFileList},
+        {exSelQueryOutputSettings, &onQueryOutputFileList},
+        {exSelQueryExportFileExtension, &onQueryOutputFileList},
+        {exSelParamButton, &onParamButton},
         {exSelEndInstance, &onEndInstance},
         {exSelExport, &onExport},
-        {exSelQueryOutputFileList, &onQueryOutputFileList},
-        {exSelValidateParamChanged, &onValidateParamChanged},
-        {exSelGenerateDefaultParams, &onGenerateDefaultParams},
         {kExSelQueryStillSequence, &onQueryStill},
+        {exSelShutdown, &onShutdown},
+        {exSelValidateParamChanged, &onValidateParamChanged},
+        {exSelValidateOutputSettings, &onQueryOutputFileList},
+        {exSelQueryOutputFileList, &onQueryOutputFileList},
     };
     for (const auto& entry : kTable) {
         if (entry.selector == selector) return entry.handler(selector, stdParms, param1, param2);
