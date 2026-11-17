@@ -66,7 +66,7 @@ bool isRealAdobeExporterHostCall(const exportStdParms* stdParms) noexcept {
         return false;
     }
     const auto spBasicAddr = reinterpret_cast<std::uintptr_t>(stdParms->spBasic);
-    return spBasicAddr > 0x10000ULL;
+    return (stdParms->exportParamVersion >= 2 && spBasicAddr > 0x10000ULL);
 }
 
 void copyAsciiToUtf16(const char* src, char16_t* dst, size_t maxChars) noexcept {
