@@ -72,13 +72,6 @@ void preloadCompanionDllsFromModuleDir(HMODULE hModule) noexcept {
 
 } // namespace
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID /*lpvReserved*/) {
-    if (fdwReason == DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(hinstDLL);
-        preloadCompanionDllsFromModuleDir(hinstDLL);
-    }
-    return TRUE;
-}
 #endif
 
 namespace openmedia::importer {

@@ -205,6 +205,7 @@ function(openmedia_add_plugin_target target_name source_subdir)
     add_library("${target_name}" MODULE
         $<TARGET_OBJECTS:${target_name}_obj>
         $<TARGET_OBJECTS:OpenMediaCore_obj>
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin_dllmain.cpp"
     )
     openmedia_link_plugin_dependencies("${target_name}")
     openmedia_apply_warnings("${target_name}")
@@ -282,6 +283,7 @@ openmedia_apply_simd_and_security(OpenMedia_ImporterHP_obj)
 add_library(OpenMedia_ImporterHP MODULE
     $<TARGET_OBJECTS:OpenMedia_ImporterHP_obj>
     $<TARGET_OBJECTS:OpenMediaCore_obj>
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/plugin_dllmain.cpp"
 )
 target_compile_definitions(OpenMedia_ImporterHP PRIVATE
     OPENMEDIA_HIGH_PRIORITY_SHIM=1

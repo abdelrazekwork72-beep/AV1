@@ -43,13 +43,6 @@ void preloadExporterCompanionLibs(HMODULE hinstDLL) noexcept {
 }
 } // namespace
 
-BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID) {
-    if (fdwReason == DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(hinstDLL);
-        preloadExporterCompanionLibs(hinstDLL);
-    }
-    return TRUE;
-}
 #endif
 
 namespace openmedia::exporter {
