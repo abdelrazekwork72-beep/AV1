@@ -1,5 +1,5 @@
-// OpenMedia Premiere Pro Importer Windows Resource Script (v3.0.1)
-// Binary-exact Adobe MediaCore 7.0 IMPT (1000) & PiPL (16000) resources.
+// OpenMedia Premiere Pro Importer Windows Resource Script (v3.0.2)
+// Binary-exact Adobe MediaCore 7.0 IMPT (1000), PiPL (16000) & SxS RT_MANIFEST (2) resources.
 // FourCC: 0x4F4D4950 ('OMIP') — strictly avoids reserved After Effects FourCC.
 // Registration tokens: OpenMedia Importer | 1.0.0.0 | xImportEntry
 
@@ -9,6 +9,13 @@
 #define OPENMEDIA_IMPORTER_NAME         "OpenMedia Importer"
 #define OPENMEDIA_IMPORTER_ENTRY        "xImportEntry"
 #define OPENMEDIA_IMPORTER_VERSION_STR  "1.0.0.0"
+
+// ---------------------------------------------------------------------------
+// SxS Activation Context Manifest (Resource Type 24 = RT_MANIFEST, ID = 2)
+// Instructs Windows loader (ntdll!LdrpResolveDllName) to resolve companion DLLs
+// from the .prm plugin directory (C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore).
+// ---------------------------------------------------------------------------
+2 24 "openmedia_sxs.manifest"
 
 // ---------------------------------------------------------------------------
 // IMPT Resource Table (Adobe MediaCore Importer Registration: 4 bytes \x00\x00IN)
@@ -51,8 +58,8 @@ BEGIN
 END
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     3,0,1,0
-PRODUCTVERSION  3,0,1,0
+FILEVERSION     3,0,2,0
+PRODUCTVERSION  3,0,2,0
 FILEFLAGSMASK   0x3fL
 FILEFLAGS       0x0L
 FILEOS          0x40004L
@@ -65,11 +72,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "OpenMedia\0"
             VALUE "FileDescription",  "OpenMedia Importer (Premiere Pro, Media Encoder, After Effects)\0"
-            VALUE "FileVersion",      "3.0.1 (1.0.0.0)\0"
+            VALUE "FileVersion",      "3.0.2 (1.0.0.0)\0"
             VALUE "InternalName",     "OpenMedia_Importer (xImportEntry)\0"
             VALUE "OriginalFilename", "OpenMedia_Importer.prm\0"
             VALUE "ProductName",      "OpenMedia Importer\0"
-            VALUE "ProductVersion",   "3.0.1.0\0"
+            VALUE "ProductVersion",   "3.0.2.0\0"
         END
     END
     BLOCK "VarFileInfo"

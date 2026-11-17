@@ -1,7 +1,7 @@
 #pragma once
 /// @file importer_types.hpp
 /// @brief Shared Adobe MediaCore Importer bridge types, official selectors, return codes,
-///        and binary-aligned host structs for Module 2 (Premiere Pro / Media Encoder x64 ABI).
+///        and binary-aligned host structs for Module 2 (Premiere Pro / Media Encoder x64 ABI v3.0.2).
 
 #include "openmedia/core_types.hpp"
 
@@ -102,6 +102,7 @@ inline constexpr prBool kPrFalseVal = 0;
 inline constexpr csSDK_uint32 kRandomAccessImportFlag = 0x00000001U;
 inline constexpr csSDK_int32 kPPixBufferAccessWriteOnly = 1;
 inline constexpr csSDK_int32 kPPixBufferAccessReadOnly = 0;
+inline constexpr csSDK_int32 kPrHostPPixBufferAccessWriteOnly = 2;
 
 /// @brief Extended pixel format constants for 10/12-bit HDR and alpha negotiation.
 inline constexpr csSDK_uint32 kPixFmtBGRA4444_8u = PrPixelFormat_BGRA_4444_8u;
@@ -126,108 +127,148 @@ enum class PrAudioChannelLabelId : uint32_t {
 
 // ============================================================================
 // Binary-Exact Real Adobe Premiere Pro x64 Host ABI Layouts (#pragma pack(4))
+// Verified instruction-by-instruction against InfluxAdobeBase.dll (v2.0.0)
 // ============================================================================
 #pragma pack(push, 4)
 
+struct PrHostMemFuncs {
+    std::uint8_t reserved0[0x18]{};
+    void (*disposePtr)(char* ptr) = nullptr;          // +0x18
+    std::uint8_t reserved1[0x18]{};
+    void (*disposeHandle)(char** handle) = nullptr;   // +0x38
+    char* (*newPtr)(csSDK_uint32 size) = nullptr;     // +0x40
+    char** (*newHandle)(csSDK_uint32 size) = nullptr; // +0x48
+    void (*lockHandle)(char** handle) = nullptr;      // +0x50
+    void (*unlockHandle)(char** handle) = nullptr;    // +0x58
+};
+
 struct PrHostPlugSuites {
     std::uint8_t reserved0[0x38]{};
-    SPBasicSuite* (*getSPBasicSuite)() = nullptr; // +0x38
+    SPBasicSuite* (*getSPBasicSuite)() = nullptr;     // +0x38
 };
 
 struct PrHostPiSuites {
-    std::uint32_t reserved0 = 0;
-    void* utilFuncs = nullptr;            // +0x04
+    std::uint32_t piInterfaceVer = 0;                 // +0x00
+    PrHostMemFuncs* memFuncs = nullptr;               // +0x04
     std::uint8_t reserved1[0x10]{};
-    PrHostPlugSuites* plugSuites = nullptr; // +0x1C
+    PrHostPlugSuites* plugSuites = nullptr;           // +0x1C
 };
 
 struct PrRawStdParms {
-    csSDK_int32 imInterfaceVer = 0;       // +0x00
-    std::uint8_t reserved0[8]{};          // +0x04
-    PrHostPiSuites* piSuites = nullptr;   // +0x0C
+    csSDK_int32 imInterfaceVer = 0;                   // +0x00
+    std::uint8_t reserved0[8]{};                      // +0x04
+    PrHostPiSuites* piSuites = nullptr;               // +0x0C
 };
 
 struct PrRawImportInfoRec {
     std::uint8_t reserved0[0x08]{};
-    csSDK_int64 privatedata = 0;          // +0x08
+    csSDK_int64 privatedata = 0;                      // +0x08
     std::uint8_t reserved1[0x14]{};
-    csSDK_int32 canOpen = 0;              // +0x24
-    csSDK_int32 canGetPrefs8 = 0;         // +0x28
-    csSDK_int64 setupOnDblClk = 0;        // +0x2C
-    csSDK_int32 hasSetup = 0;             // +0x34
+    csSDK_int32 canOpen = 0;                          // +0x24
+    csSDK_int32 canGetPrefs8 = 0;                     // +0x28
+    csSDK_int64 setupOnDblClk = 0;                    // +0x2C
+    csSDK_int32 priority = 0;                         // +0x34 (101 for HP, 100 for standard)
     std::uint8_t reserved2[0x08]{};
-    csSDK_int64 noFile = 0;               // +0x40
-    csSDK_int32 avoidAudioConform = 0;    // +0x48
+    csSDK_int64 noFile = 0;                           // +0x40
+    csSDK_int32 avoidAudioConform = 0;                // +0x48
 };
 static_assert(offsetof(PrRawImportInfoRec, canOpen) == 0x24, "canOpen offset must be 0x24");
 static_assert(offsetof(PrRawImportInfoRec, canGetPrefs8) == 0x28, "canGetPrefs8 offset must be 0x28");
-static_assert(offsetof(PrRawImportInfoRec, hasSetup) == 0x34, "hasSetup offset must be 0x34");
+static_assert(offsetof(PrRawImportInfoRec, priority) == 0x34, "priority offset must be 0x34");
 
 struct PrRawIndFormatRec {
-    csSDK_uint32 filetype = 0;            // +0x00
-    csSDK_int32 flags = 0;                // +0x04 (0x10 = xfCanOpen | xfIsMovie)
-    csSDK_int32 canAutoOpen = 0;          // +0x08
-    char formatName[256]{};               // +0x0C
-    char formatShortName[32]{};           // +0x10C
-    char platformExtension[464]{};        // +0x12C (total size = 0x2FC = 764 bytes)
+    csSDK_uint32 filetype = 0;                        // +0x00
+    csSDK_int32 flags = 0;                            // +0x04 (0x10 = xfCanOpen | xfIsMovie)
+    csSDK_int32 canAutoOpen = 0;                      // +0x08
+    char formatName[256]{};                           // +0x0C
+    char formatShortName[32]{};                       // +0x10C
+    char platformExtension[464]{};                    // +0x12C (total size = 0x2FC = 764 bytes)
 };
 static_assert(sizeof(PrRawIndFormatRec) == 0x2FC, "PrRawIndFormatRec size must be 0x2FC");
 static_assert(offsetof(PrRawIndFormatRec, formatName) == 0x0C, "formatName offset must be 0x0C");
 static_assert(offsetof(PrRawIndFormatRec, platformExtension) == 0x12C, "platformExtension offset must be 0x12C");
 
 struct PrRawGetPrefsRec {
-    void* prefs = nullptr;                // +0x00
-    csSDK_int32 prefsLength = 0;          // +0x08
-    char firstTime = 0;                   // +0x0C
+    void* prefs = nullptr;                            // +0x00
+    csSDK_int32 prefsLength = 0;                      // +0x08
+    char firstTime = 0;                               // +0x0C
     char pad[3]{};
 };
 static_assert(offsetof(PrRawGetPrefsRec, prefsLength) == 0x08, "prefsLength offset must be 0x08");
 static_assert(offsetof(PrRawGetPrefsRec, firstTime) == 0x0C, "firstTime offset must be 0x0C");
 
 struct PrRawOpenFileRefRec8 {
-    std::uint8_t reserved0[0x0C]{};
-    const char16_t* filepathPtr = nullptr; // +0x0C
-    std::uint8_t reserved1[0x10]{};
-    void* privatedata = nullptr;          // +0x24
+    std::uint8_t reserved0[0x08]{};
+    csSDK_uint32 sdkMagic = 0;                        // +0x08 (0x53444B5F '_KDS')
+    const char16_t* filepathPtr = nullptr;            // +0x0C (pointer to UTF-16 filepath)
+    void* outFileRef = nullptr;                       // +0x14 (Windows HANDLE)
+    std::uint8_t reserved1[0x08]{};
+    void* privatedata = nullptr;                      // +0x24 (Handle allocated via memFuncs->newHandle)
     std::uint8_t reserved2[0x14]{};
-    csSDK_int32 inReadWrite = 0;          // +0x40
+    csSDK_int32 inReadWrite = 0;                      // +0x40
 };
+static_assert(offsetof(PrRawOpenFileRefRec8, filepathPtr) == 0x0C, "filepathPtr offset must be 0x0C");
+static_assert(offsetof(PrRawOpenFileRefRec8, outFileRef) == 0x14, "outFileRef offset must be 0x14");
 static_assert(offsetof(PrRawOpenFileRefRec8, privatedata) == 0x24, "privatedata offset must be 0x24");
 
 struct PrRawFrameFormat {
-    csSDK_int32 inWidth = 0;              // +0x00
-    csSDK_int32 inHeight = 0;             // +0x04
-    csSDK_uint32 inPixelFormat = 0;       // +0x08
+    csSDK_int32 inWidth = 0;                          // +0x00
+    csSDK_int32 inHeight = 0;                         // +0x04
+    csSDK_uint32 inPixelFormat = 0;                   // +0x08
 };
 
 struct PrRawSourceVideoRec {
-    std::uint8_t reserved0[0x0C]{};
-    PrTime inFrameTime = 0;               // +0x0C
-    PrRawFrameFormat* inFrameFormats = nullptr; // +0x14
-    std::uint8_t reserved1[0x08]{};
-    PPixHand* outFrame = nullptr;         // +0x24
-    void* prefs = nullptr;                // +0x2C
-    void* privatedata = nullptr;          // +0x34
+    void* privatedata = nullptr;                      // +0x00 (Handle)
+    csSDK_int32 reserved0 = 0;                        // +0x08
+    PrTime inFrameTime = 0;                           // +0x0C (PrTime in ticks)
+    PrRawFrameFormat* inFrameFormats = nullptr;       // +0x14
+    csSDK_int32 inNumFrameFormats = 0;                // +0x1C
+    csSDK_int32 reserved1 = 0;                        // +0x20
+    PPixHand* outFrame = nullptr;                     // +0x24
+    void* prefs = nullptr;                            // +0x2C
+    void* extraPrivateData = nullptr;                 // +0x34
     std::uint8_t reserved2[0x10]{};
-    csSDK_int32 inQuality = 0;            // +0x4C
+    csSDK_int32 inQuality = 0;                        // +0x4C
 };
+static_assert(offsetof(PrRawSourceVideoRec, privatedata) == 0x00, "privatedata offset must be 0x00");
 static_assert(offsetof(PrRawSourceVideoRec, inFrameTime) == 0x0C, "inFrameTime offset must be 0x0C");
 static_assert(offsetof(PrRawSourceVideoRec, inFrameFormats) == 0x14, "inFrameFormats offset must be 0x14");
 static_assert(offsetof(PrRawSourceVideoRec, outFrame) == 0x24, "outFrame offset must be 0x24");
 
 struct PrRawPreferredFrameSizeRec {
-    std::uint8_t reserved0[0x08]{};
-    csSDK_int32 inWidth = 0;              // +0x08
-    csSDK_int32 inHeight = 0;             // +0x0C
-    csSDK_uint32 inPixelFormat = 0;       // +0x10
-    csSDK_int32 inIndex = 0;              // +0x14
-    std::uint8_t reserved1[0x0C]{};
-    csSDK_int32 outWidth = 0;             // +0x24
-    csSDK_int32 outHeight = 0;            // +0x28
-    std::uint8_t reserved2[0x0C]{};
-    csSDK_int32 outSupportsScaling = 0;   // +0x38
+    void* privatedata = nullptr;                      // +0x00
+    csSDK_int32 inWidth = 0;                          // +0x08
+    csSDK_int32 inHeight = 0;                         // +0x0C
+    csSDK_uint32 inPixelFormat = 0;                   // +0x10
+    csSDK_int32 inIndex = 0;                          // +0x14
+    csSDK_int32 outWidth = 0;                         // +0x18 (verified at 0x18002e3f0 in InfluxAdobeBase.dll)
+    csSDK_int32 outHeight = 0;                        // +0x1C (verified at 0x18002e3f0 in InfluxAdobeBase.dll)
 };
-static_assert(offsetof(PrRawPreferredFrameSizeRec, outWidth) == 0x24, "outWidth offset must be 0x24");
+static_assert(offsetof(PrRawPreferredFrameSizeRec, outWidth) == 0x18, "outWidth offset must be 0x18");
+static_assert(offsetof(PrRawPreferredFrameSizeRec, outHeight) == 0x1C, "outHeight offset must be 0x1C");
+
+struct PrRawImportAudioRec7 {
+    csSDK_int64 position = 0;                         // +0x00 (sample frame offset; < 0 means sequential)
+    csSDK_uint32 size = 0;                            // +0x08 (sample frames to read)
+    float** buffer = nullptr;                         // +0x0C (array of planar float* channel buffers)
+    void* privatedata = nullptr;                      // +0x14 (Handle)
+    void* prefs = nullptr;                            // +0x1C
+};
+static_assert(offsetof(PrRawImportAudioRec7, buffer) == 0x0C, "buffer offset must be 0x0C");
+static_assert(offsetof(PrRawImportAudioRec7, privatedata) == 0x14, "privatedata offset must be 0x14");
+
+struct PrHostStringSuiteV1 {
+    prSuiteError (*DisposeString)(const void* inSDKString) = nullptr;
+    prSuiteError (*AllocateFromUTF8)(const std::uint8_t* inUTF8String, void* outSDKString) = nullptr;
+    prSuiteError (*CopyToUTF8String)(const void* inSDKString, std::uint8_t* outUTF8Buffer, csSDK_uint32* ioBytes) = nullptr;
+    prSuiteError (*CopyToUTF16String)(const void* inSDKString, char16_t* outUTF16Buffer, csSDK_uint32* ioElements) = nullptr;
+};
+
+struct PrHostTimeSuiteV1 {
+    prSuiteError (*GetTicksPerSecond)(PrTime* outTicksPerSec) = nullptr;
+    prSuiteError (*GetTicksPerVideoFrame)(PrTime* outTicksPerFrame) = nullptr;
+    prSuiteError (*GetTicksPerAudioSample)(PrTime* outTicksPerSample) = nullptr;
+};
 
 #pragma pack(pop)
 

@@ -93,8 +93,12 @@ struct PixelFormatMapEntry {
 
 constexpr PixelFormatMapEntry kPixelFormatTable[] = {
     {AV_PIX_FMT_YUV420P, PixelFormat::YUV420P},
+    {AV_PIX_FMT_YUVJ420P, PixelFormat::YUV420P},
+    {AV_PIX_FMT_YUVA420P, PixelFormat::YUV420P},
     {AV_PIX_FMT_YUV422P, PixelFormat::YUV422P},
+    {AV_PIX_FMT_YUVJ422P, PixelFormat::YUV422P},
     {AV_PIX_FMT_YUV444P, PixelFormat::YUV444P},
+    {AV_PIX_FMT_YUVJ444P, PixelFormat::YUV444P},
     {AV_PIX_FMT_YUV420P10LE, PixelFormat::YUV420P10LE},
     {AV_PIX_FMT_YUV422P10LE, PixelFormat::YUV422P10LE},
     {AV_PIX_FMT_YUV444P10LE, PixelFormat::YUV444P10LE},
@@ -180,12 +184,24 @@ void populateCodecParameters(const AVCodecParameters* par, StreamInfo& info) {
     }
 }
 
-StreamInfo extractStreamInfo(const AVStream* st, int32_t index) {
+StreamInfo extractStreamInfo(const AVFormatContext& ctx, const AVStream* st, int32_t index) {
     StreamInfo info;
     info.index = index;
     info.timeBase = RationalTime::sanitize(st->time_base.num, st->time_base.den);
     info.frameRate = selectFrameRate(st);
-    info.durationPts = (st->duration != AV_NOPTS_VALUE) ? st->duration : 0;
+    info.durationPts = (st->duration != AV_NOPTS_VALUE && st->duration > 0) ? st->duration : 0;
+    if (info.durationPts <= 0 && ctx.duration != AV_NOPTS_VALUE && ctx.duration > 0 &&
+        st->time_base.num > 0 && st->time_base.den > 0) {
+        info.durationPts = av_rescale_q(ctx.duration, AVRational{1, AV_TIME_BASE}, st->time_base);
+    }
+    if (info.durationPts <= 0 && st->nb_frames > 0 &&
+        info.frameRate.num > 0 && info.frameRate.den > 0 &&
+        st->time_base.num > 0 && st->time_base.den > 0) {
+        info.durationPts = av_rescale_q(
+            st->nb_frames,
+            AVRational{static_cast<int>(info.frameRate.den), static_cast<int>(info.frameRate.num)},
+            st->time_base);
+    }
     populateCodecParameters(st->codecpar, info);
 
     const AVDictionaryEntry* langTag = av_dict_get(st->metadata, "language", nullptr, 0);
@@ -460,7 +476,7 @@ struct CoreDemuxer::Impl {
         streamTimestamps.reserve(ctx->nb_streams);
         for (unsigned int i = 0; i < ctx->nb_streams; ++i) {
             const AVStream* st = ctx->streams[i];
-            streams.push_back(extractStreamInfo(st, static_cast<int32_t>(i)));
+            streams.push_back(extractStreamInfo(*ctx, st, static_cast<int32_t>(i)));
             streamTimestamps.push_back(makeInitialTimestampState(st));
         }
         formatCtx = std::move(ctx);

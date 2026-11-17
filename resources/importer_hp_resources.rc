@@ -1,4 +1,4 @@
-// OpenMedia Premiere Pro High-Priority Importer Windows Resource Script (v3.0.1)
+// OpenMedia Premiere Pro High-Priority Importer Windows Resource Script (v3.0.2)
 // PiPL name includes a trailing space ("OpenMedia Importer ") for Dual-PRM priority routing.
 
 #include <winresrc.h>
@@ -7,6 +7,8 @@
 #define OPENMEDIA_IMPORTER_HP_NAME         "OpenMedia Importer "
 #define OPENMEDIA_IMPORTER_HP_ENTRY        "xImportEntry"
 #define OPENMEDIA_IMPORTER_HP_VERSION_STR  "1.0.0.0"
+
+2 24 "openmedia_sxs.manifest"
 
 1000 IMPT DISCARDABLE
 BEGIN
@@ -43,8 +45,8 @@ BEGIN
 END
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     3,0,1,0
-PRODUCTVERSION  3,0,1,0
+FILEVERSION     3,0,2,0
+PRODUCTVERSION  3,0,2,0
 FILEFLAGSMASK   0x3fL
 FILEFLAGS       0x0L
 FILEOS          0x40004L
@@ -57,11 +59,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "OpenMedia\0"
             VALUE "FileDescription",  "OpenMedia High-Priority Importer (xImportEntry)\0"
-            VALUE "FileVersion",      "3.0.1 (1.0.0.0)\0"
+            VALUE "FileVersion",      "3.0.2 (1.0.0.0)\0"
             VALUE "InternalName",     "OpenMedia_ImporterHP\0"
             VALUE "OriginalFilename", "OpenMedia_ImporterHP.prm\0"
             VALUE "ProductName",      "OpenMedia Importer \0"
-            VALUE "ProductVersion",   "3.0.1.0\0"
+            VALUE "ProductVersion",   "3.0.2.0\0"
         END
     END
     BLOCK "VarFileInfo"

@@ -131,10 +131,14 @@ struct PixelFormatMapEntry {
 };
 
 /// @brief Lookup table for 8-bit, 10-bit, and 12-bit YUV pixel formats.
-constexpr std::array<PixelFormatMapEntry, 11> kPixelFormatTable{{
+constexpr std::array<PixelFormatMapEntry, 15> kPixelFormatTable{{
     {AV_PIX_FMT_YUV420P, PixelFormat::YUV420P, 8, 3, 1, 1, 1, false},
+    {AV_PIX_FMT_YUVJ420P, PixelFormat::YUV420P, 8, 3, 1, 1, 1, false},
+    {AV_PIX_FMT_YUVA420P, PixelFormat::YUV420P, 8, 3, 1, 1, 1, false},
     {AV_PIX_FMT_YUV422P, PixelFormat::YUV422P, 8, 3, 1, 1, 0, false},
+    {AV_PIX_FMT_YUVJ422P, PixelFormat::YUV422P, 8, 3, 1, 1, 0, false},
     {AV_PIX_FMT_YUV444P, PixelFormat::YUV444P, 8, 3, 1, 0, 0, false},
+    {AV_PIX_FMT_YUVJ444P, PixelFormat::YUV444P, 8, 3, 1, 0, 0, false},
     {AV_PIX_FMT_YUV420P10LE, PixelFormat::YUV420P10LE, 10, 3, 2, 1, 1, false},
     {AV_PIX_FMT_YUV422P10LE, PixelFormat::YUV422P10LE, 10, 3, 2, 1, 0, false},
     {AV_PIX_FMT_YUV444P10LE, PixelFormat::YUV444P10LE, 10, 3, 2, 0, 0, false},

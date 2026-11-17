@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release version tag to publish (e.g. v3.0.1)'
+        description: 'Release version tag to publish (e.g. v3.0.2)'
         required: false
-        default: 'v3.0.1'
+        default: 'v3.0.2'
 
 permissions:
   contents: write
@@ -29,8 +29,8 @@ jobs:
         include:
           - os: windows-latest
             platform_name: Windows-x64
-            installer_name: OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Setup.exe
-            portable_name: OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Portable.zip
+            installer_name: OpenMedia-PremierePlugin-v3.0.2-Windows-x64-Setup.exe
+            portable_name: OpenMedia-PremierePlugin-v3.0.2-Windows-x64-Portable.zip
 
     steps:
       - name: Checkout Repository
@@ -174,7 +174,7 @@ jobs:
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             echo "tag_name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag_name=v3.0.1" >> "$GITHUB_OUTPUT"
+            echo "tag_name=v3.0.2" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create or Update GitHub Release
@@ -185,17 +185,17 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            release-assets/OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Setup.exe
-            release-assets/OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Portable.zip
+            release-assets/OpenMedia-PremierePlugin-v3.0.2-Windows-x64-Setup.exe
+            release-assets/OpenMedia-PremierePlugin-v3.0.2-Windows-x64-Portable.zip
             release-assets/SHA256SUMS.txt
           body: |
             ## OpenMedia Premiere Pro & Adobe Media Encoder Plugin (`${{ steps.tag.outputs.tag_name }}` — Windows x64)
             Binary-exact **Adobe MediaCore 7.0 x64 ABI** Dual-PRM Importer (`OpenMedia_Importer.prm` & `OpenMedia_ImporterHP.prm`), Exporter (`OpenMedia_Exporter.prm`), and Bilingual (**English LTR / Arabic RTL**) Control Center (`OpenMediaDesktop.exe`).
 
-            ### Key Fixes in `v3.0.1`
+            ### Key Fixes in `v3.0.2`
             - **Real Premiere Pro / Media Encoder x64 Selector & Return-Code ABI**: Aligned all importer (`imInit=0..imGetIndColorSpace=73`, `malSupports8=101`, `imBadFormatIndex=301`) and exporter (`exSelStartup=0..exSelValidateOutputSettings=13`) selectors and `#pragma pack(4)` binary struct offsets (`PrRawImportInfoRec`, `PrRawIndFormatRec` `0x2FC` bytes, `PrRawOpenFileRefRec8`, `PrRawSourceVideoRec`).
             - **Binary `PiPL` (`8BIM`) & `IMPT`/`EXPT` Resource Tables**: Embedded little-endian `8BIM` property lists (`kind`, `name`, `eMNA`) and 4-byte `IMPT`/`EXPT` headers verified by CI PE inspection gate.
             - **Included Assets**:
-              - `OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Setup.exe`
-              - `OpenMedia-PremierePlugin-v3.0.1-Windows-x64-Portable.zip`
+              - `OpenMedia-PremierePlugin-v3.0.2-Windows-x64-Setup.exe`
+              - `OpenMedia-PremierePlugin-v3.0.2-Windows-x64-Portable.zip`
               - `SHA256SUMS.txt`

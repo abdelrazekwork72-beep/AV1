@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(OpenMediaPremierePlugin VERSION 3.0.0 LANGUAGES CXX)
+project(OpenMediaPremierePlugin VERSION 3.0.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -101,6 +101,22 @@ function(openmedia_configure_plugin_platform target_name)
             PREFIX ""
             SUFFIX ".prm"
         )
+        target_include_directories("${target_name}" PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+        )
+        if(MSVC)
+            target_link_options("${target_name}" PRIVATE "/MANIFEST:NO")
+            if(OPENMEDIA_FFMPEG_FOUND)
+                target_link_libraries("${target_name}" PRIVATE delayimp)
+                target_link_options("${target_name}" PRIVATE
+                    "/DELAYLOAD:avcodec-62.dll"
+                    "/DELAYLOAD:avformat-62.dll"
+                    "/DELAYLOAD:avutil-60.dll"
+                    "/DELAYLOAD:swresample-6.dll"
+                    "/DELAYLOAD:swscale-9.dll"
+                )
+            endif()
+        endif()
         set(rc_OpenMedia_Importer "${CMAKE_CURRENT_SOURCE_DIR}/resources/importer_resources.rc")
         set(rc_OpenMedia_ImporterHP "${CMAKE_CURRENT_SOURCE_DIR}/resources/importer_hp_resources.rc")
         set(rc_OpenMedia_Exporter "${CMAKE_CURRENT_SOURCE_DIR}/resources/exporter_resources.rc")
@@ -145,7 +161,6 @@ function(openmedia_configure_plugin_platform target_name)
 endfunction()
 
 function(openmedia_link_plugin_dependencies target_name)
-    target_link_libraries("${target_name}" PRIVATE OpenMediaCore)
     if(TARGET AdobeSDK::Headers)
         target_link_libraries("${target_name}" PRIVATE AdobeSDK::Headers)
     endif()
@@ -173,7 +188,6 @@ function(openmedia_add_plugin_target target_name source_subdir)
     target_include_directories("${target_name}_obj" PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
-    target_link_libraries("${target_name}_obj" PUBLIC OpenMediaCore)
     if(TARGET AdobeSDK::Headers)
         target_link_libraries("${target_name}_obj" PUBLIC AdobeSDK::Headers)
     endif()
@@ -188,19 +202,37 @@ function(openmedia_add_plugin_target target_name source_subdir)
     openmedia_apply_warnings("${target_name}_obj")
     openmedia_apply_simd_and_security("${target_name}_obj")
 
-    add_library("${target_name}" MODULE $<TARGET_OBJECTS:${target_name}_obj>)
+    add_library("${target_name}" MODULE
+        $<TARGET_OBJECTS:${target_name}_obj>
+        $<TARGET_OBJECTS:OpenMediaCore_obj>
+    )
     openmedia_link_plugin_dependencies("${target_name}")
     openmedia_apply_warnings("${target_name}")
     openmedia_apply_simd_and_security("${target_name}")
     openmedia_configure_plugin_platform("${target_name}")
 endfunction()
 
-add_library(OpenMediaCore SHARED
+openmedia_resolve_ffmpeg(OPENMEDIA_FFMPEG_FOUND OPENMEDIA_FFMPEG_LIBS OPENMEDIA_FFMPEG_INCS)
+
+add_library(OpenMediaCore_obj OBJECT
     src/core/demuxer.cpp
     src/core/video_decoder.cpp
     src/core/audio_decoder.cpp
     src/core/video_encoder.cpp
     src/core/muxer.cpp
+)
+target_include_directories(OpenMediaCore_obj PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+if(OPENMEDIA_FFMPEG_FOUND)
+    target_compile_definitions(OpenMediaCore_obj PUBLIC OPENMEDIA_HAS_FFMPEG=1)
+    target_include_directories(OpenMediaCore_obj PRIVATE ${OPENMEDIA_FFMPEG_INCS})
+endif()
+openmedia_apply_warnings(OpenMediaCore_obj)
+openmedia_apply_simd_and_security(OpenMediaCore_obj)
+
+add_library(OpenMediaCore SHARED
+    $<TARGET_OBJECTS:OpenMediaCore_obj>
 )
 target_include_directories(OpenMediaCore PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
@@ -214,8 +246,6 @@ if(WIN32)
 endif()
 openmedia_apply_warnings(OpenMediaCore)
 openmedia_apply_simd_and_security(OpenMediaCore)
-
-openmedia_resolve_ffmpeg(OPENMEDIA_FFMPEG_FOUND OPENMEDIA_FFMPEG_LIBS OPENMEDIA_FFMPEG_INCS)
 if(OPENMEDIA_FFMPEG_FOUND)
     target_compile_definitions(OpenMediaCore PUBLIC OPENMEDIA_HAS_FFMPEG=1)
     target_include_directories(OpenMediaCore PRIVATE ${OPENMEDIA_FFMPEG_INCS})
@@ -223,15 +253,46 @@ if(OPENMEDIA_FFMPEG_FOUND)
 endif()
 
 openmedia_add_plugin_target(OpenMedia_Importer "importer")
-# Companion High-Priority Importer shim (isHighPriority = true / 0x01) sharing OpenMedia_Importer_obj.
-add_library(OpenMedia_ImporterHP MODULE $<TARGET_OBJECTS:OpenMedia_Importer_obj>)
-target_compile_definitions(OpenMedia_ImporterHP PRIVATE OPENMEDIA_HIGH_PRIORITY_SHIM=1 OPENMEDIA_IMPORTER_HIGH_PRIORITY=1)
+
+# Companion High-Priority Importer shim (isHighPriority = true / priority = 101)
+file(GLOB importer_hp_sources CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/importer/*.cpp"
+)
+add_library(OpenMedia_ImporterHP_obj OBJECT ${importer_hp_sources})
+target_include_directories(OpenMedia_ImporterHP_obj PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+target_compile_definitions(OpenMedia_ImporterHP_obj PRIVATE
+    OPENMEDIA_HIGH_PRIORITY_SHIM=1
+    OPENMEDIA_IMPORTER_HIGH_PRIORITY=1
+)
+if(TARGET AdobeSDK::Headers)
+    target_link_libraries(OpenMedia_ImporterHP_obj PUBLIC AdobeSDK::Headers)
+endif()
+if(TARGET AdobeSDK::Utils)
+    target_link_libraries(OpenMedia_ImporterHP_obj PUBLIC AdobeSDK::Utils)
+endif()
+if(OPENMEDIA_FFMPEG_FOUND)
+    target_compile_definitions(OpenMedia_ImporterHP_obj PRIVATE OPENMEDIA_HAS_FFMPEG=1)
+    target_include_directories(OpenMedia_ImporterHP_obj PRIVATE ${OPENMEDIA_FFMPEG_INCS})
+endif()
+openmedia_apply_warnings(OpenMedia_ImporterHP_obj)
+openmedia_apply_simd_and_security(OpenMedia_ImporterHP_obj)
+
+add_library(OpenMedia_ImporterHP MODULE
+    $<TARGET_OBJECTS:OpenMedia_ImporterHP_obj>
+    $<TARGET_OBJECTS:OpenMediaCore_obj>
+)
+target_compile_definitions(OpenMedia_ImporterHP PRIVATE
+    OPENMEDIA_HIGH_PRIORITY_SHIM=1
+    OPENMEDIA_IMPORTER_HIGH_PRIORITY=1
+)
 openmedia_link_plugin_dependencies(OpenMedia_ImporterHP)
 openmedia_apply_warnings(OpenMedia_ImporterHP)
 openmedia_apply_simd_and_security(OpenMedia_ImporterHP)
 openmedia_configure_plugin_platform(OpenMedia_ImporterHP)
-openmedia_add_plugin_target(OpenMedia_Exporter "exporter")
 
+openmedia_add_plugin_target(OpenMedia_Exporter "exporter")
 
 # Module 5: Bilingual (EN LTR / AR RTL) Desktop Control Center & Host Popup (OpenMediaDesktop.exe)
 add_library(OpenMediaDesktopLib STATIC
@@ -353,7 +414,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/exporter")
         )
     endforeach()
 endif()
-
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/desktop")
     file(GLOB OPENMEDIA_DESKTOP_TESTS CONFIGURE_DEPENDS

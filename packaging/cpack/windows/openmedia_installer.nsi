@@ -1,10 +1,10 @@
-; OpenMedia Premiere Pro & Media Encoder Plugin v3.0.1 — Native Windows x64 NSIS Installer
+; OpenMedia Premiere Pro & Media Encoder Plugin v3.0.2 — Native Windows x64 NSIS Installer
 ; Installs Dual-PRM Importers, Exporter, OpenMediaCore.dll, OpenMediaDesktop.exe, FFmpeg Runtime DLLs, and Config.toml to MediaCore 7.0
 
 !include "MUI2.nsh"
 !include "x64.nsh"
 
-Name "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.1"
+Name "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.2"
 OutFile "${OUTFILE}"
 InstallDir "C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore"
 RequestExecutionLevel admin
@@ -61,14 +61,17 @@ Section "OpenMedia MediaCore 7.0 Plugins" SecMain
   CreateShortCut "$DESKTOP\OpenMedia Control Center.lnk" "$INSTDIR\OpenMediaDesktop.exe"
   WriteUninstaller "$INSTDIR\Uninstall-OpenMedia.exe"
 
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.1 (x64)"
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "OpenMedia Premiere Pro & Media Encoder Plugin v3.0.2 (x64)"
   WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" "$\"$INSTDIR\Uninstall-OpenMedia.exe$\""
   WriteRegStr HKLM "${UNINST_KEY}" "QuietUninstallString" "$\"$INSTDIR\Uninstall-OpenMedia.exe$\" /S"
   WriteRegStr HKLM "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "OpenMedia Project"
-  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "3.0.1"
+  WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "3.0.2"
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
+
+  ; Clear stale Adobe Premiere Pro & Media Encoder PluginCache keys so v3.0.2 is re-scanned on next launch
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem -Path HKCU:\Software\Adobe -Recurse -ErrorAction SilentlyContinue | Where-Object { $$_.Name -match ''PluginCache|MediaCore'' } | ForEach-Object { Remove-Item -Path $$_.PSPath -Recurse -Force -ErrorAction SilentlyContinue }"'
 SectionEnd
 
 Section "Uninstall"
